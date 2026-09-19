@@ -1,0 +1,9 @@
+import type { SettingsRepository } from "@/lib/repositories/contracts";
+import type { BusinessSettings } from "@/types";
+import { assertResult, type DbClient } from "./shared";
+
+export class SupabaseSettingsRepository implements SettingsRepository {
+  constructor(private readonly db: DbClient, private readonly userId: string) {}
+  async get(): Promise<BusinessSettings> { const [{ data: settings, error }, { data: profile, error: profileError }] = await Promise.all([this.db.from("settings").select("*").eq("user_id", this.userId).maybeSingle(), this.db.from("profiles").select("*").eq("id", this.userId).maybeSingle()]); if (error || profileError) throw new Error("Unable to load settings"); return { userId: this.userId, fullName: String(profile?.full_name ?? ""), businessName: String(profile?.company_name ?? ""), defaultLanguage: String(settings?.default_language ?? "en"), targetIndustries: (settings?.target_industries as string[] | null) ?? [], targetLocations: (settings?.target_locations as string[] | null) ?? [], minimumLeadScore: Number(settings?.minimum_lead_score ?? 70), companyServices: (settings?.company_services as string[] | null) ?? [], companyDescription: String(settings?.company_description ?? "") }; }
+  async upsert(input: Omit<BusinessSettings, "userId">) { const profileResult = await this.db.from("profiles").upsert({ id: this.userId, full_name: input.fullName, company_name: input.businessName }); if (profileResult.error) throw new Error("Unable to save profile"); const { data, error } = await this.db.from("settings").upsert({ user_id: this.userId, default_language: input.defaultLanguage, target_industries: input.targetIndustries, target_locations: input.targetLocations, minimum_lead_score: input.minimumLeadScore, company_services: input.companyServices, company_description: input.companyDescription }).select().single(); assertResult(data, error, "settings.upsert"); return this.get(); }
+}

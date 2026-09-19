@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { scoreLead } from "../lib/scoring";
+describe("lead scoring", () => { it("rewards verified high-value digital gaps and clamps results", () => { const result = scoreLead({ hasWebsite: false, websiteQuality: "unknown", mobileQuality: "unknown", onlineBooking: "missing", reviewCount: 143, professionalService: true }); expect(result.score).toBe(82); expect(result.reasons).toContain("No dedicated website"); }); it("marks unavailable review data as unknown", () => { expect(scoreLead({ hasWebsite: null, websiteQuality: "unknown", mobileQuality: "unknown", onlineBooking: "unknown", reviewCount: null, professionalService: false }).evidence).toContain("Review count: Unknown"); }); });
