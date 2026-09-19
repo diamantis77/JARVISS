@@ -13,3 +13,8 @@ export function getRuntimeMode(): RuntimeMode {
 export function isOpenAiConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }
+
+export function getResearchMode(mode: RuntimeMode): "demo" | "live" | "disabled" {
+  if (mode === "demo") return "demo";
+  return process.env.LIVE_RESEARCH_ENABLED === "true" && isOpenAiConfigured() ? "live" : "disabled";
+}

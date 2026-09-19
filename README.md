@@ -1,20 +1,21 @@
-# JARVIS v0.2 · Personal AI Business OS
+# JARVIS v0.3 · Live Research
 
-JARVIS is an authenticated, persistent AI command center for business operations. A natural-language command becomes a stored run, the AI may select narrowly scoped tools, every visible step represents real backend work, and sensitive or external actions stop at an application-enforced approval gate.
+JARVIS is an authenticated, persistent AI business command center. v0.3 adds evidence-first public business research while preserving the v0.2 tool loop, Supabase isolation, streaming runs, approval gates, and bilingual behavior.
 
-The existing premium interface remains demo-first: the app works without credentials using fictional in-memory data, while configured installations use Supabase and optionally OpenAI.
+Research can discover real public businesses, match official sites, safely inspect selected pages, extract deterministic signals, optionally interpret those signals with AI, calculate an evidence-only score, persist citations, and resume long jobs in small batches. It never contacts a business.
 
 ## Runtime modes
 
-| Mode | Activated when | Data | AI |
-| --- | --- | --- | --- |
-| **Demo Mode** | Supabase variables are absent | Fictional seeded data, reset on server restart | Deterministic local demo provider |
-| **Live Mode · Demo AI** | Supabase is configured but `OPENAI_API_KEY` is absent | Authenticated, persistent Supabase data | Deterministic demo provider |
-| **Live Mode** | Supabase and OpenAI are configured | Authenticated, persistent Supabase data | OpenAI Responses API |
+| Mode | Configuration | Behavior |
+| --- | --- | --- |
+| Demo | Supabase variables absent | Fictional `.example` businesses and fictional analysis, clearly labeled; no live web access |
+| Live data, Demo AI | Supabase configured, no OpenAI key | Authenticated persistence; deterministic assistant; Live Research disabled |
+| Live, research off | Supabase + OpenAI, `LIVE_RESEARCH_ENABLED=false` | Real AI and CRM; public research remains disabled |
+| Live Research | Supabase + OpenAI, `LIVE_RESEARCH_ENABLED=true` | OpenAI Responses web search plus secure website analysis |
 
-Demo Mode never reports that an external action succeeded. Email, website research, lead search, telephony, calendar, and voice providers remain disconnected in v0.2.
+The header always reports the active research mode. Unknown is never treated as a negative fact.
 
-## Quick start in Demo Mode
+## Local setup
 
 ```powershell
 npm install
@@ -22,103 +23,80 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Leave the Supabase and OpenAI values empty, then open `http://localhost:3000`. Authentication is intentionally bypassed only in Demo Mode.
+Open `http://127.0.0.1:3000`. With empty credentials the app starts in Demo Mode and bypasses authentication locally.
 
-## Architecture
+Example commands:
 
-```text
-app/                         Next.js pages, auth actions, and API routes
-components/                  Existing command center, CRM, auth, approval UI
-lib/ai/                      Provider-neutral AI contract, OpenAI and demo adapters
-lib/ai/instructions/         Versioned server-only JARVIS instructions
-lib/jarvis/tool-loop.ts      Persistent model/tool/approval execution loop
-lib/repositories/            Typed interfaces plus demo and Supabase implementations
-lib/supabase/                Cookie-aware browser, server, and middleware clients
-lib/tools/                   Zod schemas, registry, permission gate, tool handlers
-supabase/migrations/         Additive PostgreSQL schema and RLS hardening
-tests/                       Security, repository, tools, loop, and persistence tests
-```
+- `Find 10 dentists in Athens`
+- `Βρες μου 15 λογιστικά γραφεία στη Θεσσαλονίκη`
+- `Research the website of lead <lead-id> again using https://example.com`
 
-The browser never calls OpenAI or the database with a supplied user ID. Live repositories obtain the authenticated user on the server, add an explicit `user_id` predicate to user-owned queries, and are backed by Row Level Security.
+## Live setup
 
-## Environment variables
-
-Copy `.env.example` to `.env.local`.
-
-| Variable | Required | Where it comes from |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Live Mode | Supabase Dashboard → Project Settings → Data API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Live Mode | Supabase Dashboard → Project Settings → API Keys → Publishable key |
-| `OPENAI_API_KEY` | Real AI | OpenAI Platform → API keys; server-only, never prefix with `NEXT_PUBLIC_` |
-| `OPENAI_MODEL` | Optional | Defaults to `gpt-5`; choose a Responses API model available to the project |
-| `EMAIL_PROVIDER`, `EMAIL_API_KEY` | Not used yet | Reserved provider boundary; email sending remains disabled |
-| `TELEPHONY_PROVIDER`, `TELEPHONY_API_KEY` | Not used yet | Reserved provider boundary; calling remains disabled |
-
-Do not add a Supabase service-role key. Normal v0.2 operations use the signed-in user's cookie session and RLS.
-
-## Exact Supabase setup
-
-1. Create a Supabase project.
-2. Open **SQL Editor** and run, in order:
+1. Create a Supabase project and run these files in order in the SQL Editor:
    - `supabase/migrations/0001_initial_schema.sql`
    - `supabase/migrations/0002_v02_auth_persistence.sql`
-3. In **Authentication → Providers**, enable Email. Decide whether email confirmation is required for the project.
-4. In **Authentication → URL Configuration** set:
-   - Site URL for local development: `http://localhost:3000`
-   - Redirect URL: `http://localhost:3000/auth/callback`
-   - Add the equivalent HTTPS callback URL for each deployed environment.
-5. Copy the Project URL and Publishable key into `.env.local`.
-6. Restart `npm run dev`, visit `/auth/sign-up`, confirm the email if enabled, then complete `/onboarding`.
+   - `supabase/migrations/0003_v03_live_research.sql`
+2. Enable Supabase Email authentication. Configure local Site URL `http://localhost:3000` and callback `http://localhost:3000/auth/callback`.
+3. Set the Supabase Project URL and publishable key in `.env.local`. Do not use a service-role key.
+4. Set a server-only `OPENAI_API_KEY`, choose an available Responses API model, and set `LIVE_RESEARCH_ENABLED=true`.
+5. Restart the server, sign in, and tune research caps under Settings.
 
-The second migration is additive. It preserves the original schema, adds run context and approval resolution data, supplies missing indexes and update triggers, hardens child-table `USING` and `WITH CHECK` policies, and creates profile/settings rows after signup.
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5
+OPENAI_RESEARCH_MODEL=gpt-5
+LIVE_RESEARCH_ENABLED=true
+RESEARCH_MAX_LEADS=50
+```
 
-## Exact OpenAI setup
+`OPENAI_RESEARCH_MODEL` is optional and falls back to `OPENAI_MODEL`. The application hard-caps a run at 50 candidates even if configuration is incorrect.
 
-1. Create or select an OpenAI API project in the OpenAI Platform.
-2. Create a project API key and store it as `OPENAI_API_KEY` in `.env.local`.
-3. Optionally set `OPENAI_MODEL`; otherwise JARVIS uses `gpt-5`.
-4. Restart the development server.
+## Research architecture
 
-All requests use the server-side OpenAI SDK and the Responses API. The provider only asks for tool calls; application code validates arguments, checks permissions, executes registered tools, persists results, and returns tool output to the model.
+```text
+owner command
+  -> versioned JARVIS instructions + registered tools
+  -> OpenAI Responses built-in web_search (discovery and citations)
+  -> exact identity dedupe (domain, public phone, or exact normalized name + location)
+  -> SSRF-hardened fetcher (HTTP/S only, DNS/IP checks, redirect revalidation, limits)
+  -> deterministic HTML signal extraction
+  -> optional AI interpretation inside an explicit untrusted-content boundary
+  -> evidence-only deterministic scoring
+  -> per-user Supabase persistence and incremental UI events
+```
 
-## Authentication and route protection
+Discovery and verification are separate. Search snippets are not silently upgraded to verified facts. Similar names remain separate unless a strong identity key matches. The fetcher blocks localhost, credentials in URLs, private/reserved IPv4 and IPv6, internal host suffixes, redirects into blocked networks, unsupported content, excessive redirects, oversized bodies, and timeouts. It sends no auth headers, cookies, CRM data, or API keys.
 
-`middleware.ts` refreshes the cookie-based Supabase session and verifies identity with `getClaims()`. In Live Mode every application and API route is protected except the sign-in, sign-up, password recovery, update-password, and auth callback routes. Sign out is a server action and clears only the current local session.
+Website content is untrusted data. It cannot change system instructions, authorize a tool, or bypass the fixed permission registry. Full HTML and extracted page text are not persisted; only structured signals, summaries, source URLs, and provenance are stored.
 
-Password reset emails return through `/auth/callback?next=/auth/update-password`. If confirmation or reset links return to the wrong host, recheck Supabase Site URL and Redirect URLs.
+## Adding another discovery provider
 
-## Tool architecture
+The core depends on `BusinessDiscoveryProvider` and `WebResearchProvider` contracts in `lib/research/contracts.ts`, not on a provider-specific record format. A future adapter should return normalized `DiscoveredBusiness` candidates with source URLs and confidence, then be selected in `lib/research/factory.ts`. Keep provider labels and source metadata intact so the evidence model remains auditable.
 
-Every tool has:
+A future Google Places adapter should remain a separate provider boundary. Before persisting any Places-derived content, review the current Google Maps Platform terms, caching limits, attribution requirements, and data-retention rules. Do not couple CRM lead records directly to Google identifiers or arbitrary provider payloads.
 
-- a stable name and user-facing description;
-- Zod input and output schemas;
-- a JSON schema exposed to the model;
-- a fixed `SAFE_AUTOMATIC` or `REQUIRES_USER_APPROVAL` permission;
-- a handler that receives only the scoped repository bundle and runtime mode.
+## Persistence and resume
 
-Safe persistent tools include CRM lookup/search/save, tasks, activity, analysis, scoring, and draft creation. `search_leads`, `get_business_details`, and `analyze_website` report that no external provider is connected instead of fabricating research.
+Migration `0003_v03_live_research.sql` adds:
 
-## JARVIS tool loop
+- research runs and deduplicated candidates;
+- public source citations and lead evidence;
+- historical website analyses;
+- score components, evidence IDs, confidence, and last-researched time;
+- research settings and per-user RLS checks across parent and child records.
 
-1. Validate the command and create a persistent `jarvis_run`.
-2. Persist the real “Understanding request” step.
-3. Load business settings and only a small structured summary of recent runs.
-4. Ask the selected AI provider for a response and optional registered tool calls.
-5. Parse and validate every argument with Zod.
-6. Execute safe tools through the registry, persist step output, and return it to the model.
-7. Repeat up to the bounded iteration limit or persist the concise final response.
-8. Stream newline-delimited JSON run, step, approval, completion, or error events to the command center.
+Research processes persisted batches of five with configurable concurrency. Progress is written after every candidate. The browser resumes the next batch with a separate authenticated request, so long jobs do not depend on one request. Cancellation preserves completed evidence, and continuation only claims candidates still marked `discovered`.
 
-Hidden chain-of-thought is never displayed. The UI shows only plan labels, tool names, state changes, and concise outputs.
+## Scoring v2
 
-## Approval security
+Scores only contain components backed by persisted evidence references. Supported service fit, geography, activity, public contact paths, and verified website gaps may contribute points. Missing or failed research contributes zero; it does not imply that a website, booking flow, CTA, or mobile support is absent. Lead details show each score component and its evidence count.
 
-The model cannot grant approval. `send_email` and sensitive CRM updates are marked `REQUIRES_USER_APPROVAL` in source code. When requested, the loop validates the payload, creates an approval record, marks the run `waiting_for_approval`, and returns without calling the handler.
+## Approval and outreach boundary
 
-Approve, Edit, and Reject operate on the authenticated user's persistent approval. Approval execution reloads the record, verifies it is still pending, re-resolves the registered tool and permission, revalidates the stored payload against the current schema, and only then invokes the single approved action. The result or failure and resolver identity are persisted and logged.
-
-Email still returns `sent: false` because no email provider is connected; approval never implies successful delivery.
+Research, fetching, analysis, scoring, and internal persistence are safe automatic operations. External or sensitive tools such as email sending and important CRM changes still stop at the authoritative application approval gate. No Gmail, Twilio, calendar, mass outreach, or autonomous contacting capability is added in v0.3. Approval does not imply delivery; the email provider remains disconnected.
 
 ## Quality checks
 
@@ -129,18 +107,18 @@ npm test
 npm run build
 ```
 
-Tests do not contact OpenAI or require paid services. They cover protected-route decisions, explicit repository user scoping and cross-user isolation, safe and approval-only tool execution, malformed input, direct and multi-tool AI turns, approval pauses, graceful failures, and run/step/approval persistence.
+Tests cover SSRF URLs and redirects, timeout/size/content limits, injection boundaries, evidence-only scoring, deterministic dedupe, persisted resume/cancel behavior, user-scoped evidence, tool authorization, the existing tool loop, approvals, and repository persistence. Tests do not call OpenAI or paid services.
 
 ## Troubleshooting
 
-- **The app says Demo Mode:** both Supabase public variables must be non-empty; restart Next.js after changing `.env.local`.
-- **Sign-in redirects back to sign-in:** verify the Project URL/key pair, Email provider, browser cookies, and local callback URL.
-- **A new user has no settings:** confirm `0002_v02_auth_persistence.sql` ran successfully and the `on_auth_user_created` trigger exists.
-- **Database permission error:** do not use a service key. Confirm both migrations ran and that requests carry the authenticated user's cookie session.
-- **JARVIS says it could not complete a run:** verify the OpenAI key/model and network access. Stored data remains intact; remove the OpenAI key to use Demo AI while diagnosing.
-- **An external lookup returns Unknown:** this is expected in v0.2 because no live research provider is connected.
-- **An approved email is not sent:** expected; email delivery is deliberately unimplemented and never simulated as successful.
+- **Header says RESEARCH OFF:** set both `OPENAI_API_KEY` and `LIVE_RESEARCH_ENABLED=true`, then restart Next.js.
+- **Demo results appear:** Demo Mode deliberately uses fictional `.example` records. Configure Supabase to enter Live Mode.
+- **Research returns no candidates:** the provider failed or returned no cited candidates; JARVIS does not fabricate replacements.
+- **Website signals are Unknown:** the official site was not confidently identified or the secure fetcher rejected/timed out. Inspect the run steps and sources.
+- **Database errors after upgrade:** run migration `0003_v03_live_research.sql` after the first two migrations.
+- **A partial run remains:** reopening/continuing it is safe; processed candidates are not duplicated.
+- **An approved email is not sent:** expected. v0.3 does not connect an email provider.
 
 ## Known limitations
 
-v0.2 intentionally does not implement scraping, Gmail, mass outreach, Twilio/phone calls, voice sessions, calendars, autonomous outreach, or multi-agent orchestration. Rate limiting is per running application instance, and production deployments should replace it with a shared store. Demo repositories are in memory and reset when the server restarts.
+Live Research depends on public web availability, the configured OpenAI model's web-search support, and the target site's willingness to serve public HTML. It does not execute JavaScript, bypass access controls, solve CAPTCHAs, scrape authenticated pages, or guarantee exhaustive market coverage. In-memory Demo Mode resets on server restart. Rate limiting is process-local and should use shared infrastructure in multi-instance production.

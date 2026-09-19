@@ -1,5 +1,5 @@
 import type { Repositories } from "./contracts";
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, Task } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ResearchCandidate, ResearchRun, ResearchSource, Task, WebsiteAnalysis } from "../../types";
 import { demoActivities, demoApproval, demoLeads, demoRun, demoTasks } from "../demo-data";
 
 export function createDemoRepositories(): Repositories {
@@ -9,7 +9,12 @@ export function createDemoRepositories(): Repositories {
   const runs: JarvisRun[] = [structuredClone(demoRun)];
   const approvals: Approval[] = [structuredClone(demoApproval)];
   const interactions: Interaction[] = [];
-  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses." };
+  const researchRuns: ResearchRun[] = [];
+  const researchCandidates: ResearchCandidate[] = [];
+  const researchSources: ResearchSource[] = [];
+  const leadEvidence: LeadEvidence[] = [];
+  const websiteAnalyses: WebsiteAnalysis[] = [];
+  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false };
   return {
     leads: {
       async list() { return [...leads].sort((a, b) => b.score - a.score); },
@@ -52,6 +57,25 @@ export function createDemoRepositories(): Repositories {
     settings: {
       async get() { return settings; },
       async upsert(input) { settings = { ...input, userId: settings.userId }; return settings; },
+    },
+    research: {
+      async createRun(input) { const run: ResearchRun = { id: `research_${crypto.randomUUID()}`, jarvisRunId: input.jarvisRunId, query: input.query, industry: input.industry, location: input.location, requestedLimit: input.requestedLimit, status: "running", discoveredCount: 0, verifiedCount: 0, analyzedCount: 0, qualifiedCount: 0, failedCount: 0, processedCount: 0, config: input.config, createdAt: new Date().toISOString(), completedAt: null }; researchRuns.unshift(run); return run; },
+      async getRun(id) { return researchRuns.find((run) => run.id === id) ?? null; },
+      async updateRun(id, patch) { const run = researchRuns.find((item) => item.id === id); if (!run) throw new Error("Research run not found"); Object.assign(run, patch); return run; },
+      async addCandidates(runId, candidates) { const added: ResearchCandidate[] = []; for (const input of candidates) { if (researchCandidates.some((item) => item.researchRunId === runId && item.normalizedKey === input.normalizedKey)) continue; const candidate: ResearchCandidate = { ...input, id: `candidate_${crypto.randomUUID()}`, researchRunId: runId, leadId: null, error: null, createdAt: new Date().toISOString() }; researchCandidates.push(candidate); added.push(candidate); } return added; },
+      async listCandidates(runId) { return researchCandidates.filter((item) => item.researchRunId === runId); },
+      async listPendingCandidates(runId, limit) { return researchCandidates.filter((item) => item.researchRunId === runId && item.status === "discovered").slice(0, limit); },
+      async updateCandidate(id, patch) { const candidate = researchCandidates.find((item) => item.id === id); if (!candidate) throw new Error("Research candidate not found"); Object.assign(candidate, patch); return candidate; },
+      async claimContinuation(id) { const run = researchRuns.find((item) => item.id === id); if (!run || run.status !== "partial") throw new Error("Research batch is already active or resolved"); run.status = "running"; return run; },
+      async cancel(id) { const run = researchRuns.find((item) => item.id === id); if (!run) throw new Error("Research run not found"); run.status = "cancelled"; run.completedAt = new Date().toISOString(); return run; },
+    },
+    evidence: {
+      async addSource(input) { const item: ResearchSource = { ...input, id: `source_${crypto.randomUUID()}`, retrievedAt: input.retrievedAt ?? new Date().toISOString(), createdAt: new Date().toISOString() }; researchSources.push(item); return item; },
+      async addEvidence(input) { const item: LeadEvidence = { ...input, id: `evidence_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; leadEvidence.push(item); return item; },
+      async addWebsiteAnalysis(input) { const item: WebsiteAnalysis = { ...input, visibleText: "", id: `website_${crypto.randomUUID()}`, retrievedAt: input.retrievedAt ?? new Date().toISOString() }; websiteAnalyses.push(item); return item; },
+      async listSourcesForLead(leadId) { return researchSources.filter((item) => item.leadId === leadId); },
+      async listEvidenceForLead(leadId) { return leadEvidence.filter((item) => item.leadId === leadId); },
+      async listWebsiteAnalysesForLead(leadId) { return websiteAnalyses.filter((item) => item.leadId === leadId); },
     },
   };
 }

@@ -1,9 +1,10 @@
 import type { Repositories } from "../repositories/contracts";
 import type { RuntimeMode } from "../config/runtime";
 import type { ToolPermission } from "../../types";
+import type { ResearchService } from "../research/contracts";
 import { z } from "zod";
 
-export interface ToolRuntimeContext { repositories: Repositories; mode: RuntimeMode }
+export interface ToolRuntimeContext { repositories: Repositories; mode: RuntimeMode; jarvisRunId?: string; researchService?: ResearchService; emitProgress?: (description: string, metadata?: Record<string, unknown>) => Promise<void> | void }
 export interface JarvisTool<TInput extends z.ZodType, TOutput extends z.ZodType> {
   name: string; description: string; permission: ToolPermission; input: TInput; output: TOutput; parameters: Record<string, unknown>;
   execute: (context: ToolRuntimeContext, input: z.infer<TInput>) => Promise<z.infer<TOutput>>;
@@ -46,33 +47,50 @@ const registry = {
     execute: async ({ repositories }, { limit }) => ({ activities: (await repositories.activity.list(limit)).map(({ id, time, title, description }) => ({ id, time, title, description })) }),
   },
   analyze_business: {
-    name: "analyze_business", description: "Summarize already stored CRM evidence for a lead. It does not browse the web.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1) }), output: z.object({ summary: z.string(), evidenceStatus: z.string() }), parameters: objectSchema({ leadId: stringProp("Exact CRM lead ID") }),
-    execute: async ({ repositories }, { leadId }) => { const lead = await repositories.leads.getById(leadId); if (!lead) throw new Error("Lead not found"); return { summary: `${lead.businessName}: ${lead.opportunitySummary}`, evidenceStatus: lead.source === "demo" ? "Demo evidence only" : "Stored CRM evidence only" }; },
+    name: "analyze_business", description: "Summarize accumulated, stored evidence for one CRM lead without inventing missing facts.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1) }), output: z.object({ summary: z.string(), strengths: z.array(z.string()), digitalGaps: z.array(z.string()), unknowns: z.array(z.string()), evidenceReferences: z.array(z.string()), confidence: z.string() }), parameters: objectSchema({ leadId: stringProp("Exact CRM lead ID") }),
+    execute: async ({ repositories }, { leadId }) => { const lead = await repositories.leads.getById(leadId); if (!lead) throw new Error("Lead not found"); const [evidence, analyses] = await Promise.all([repositories.evidence.listEvidenceForLead(leadId), repositories.evidence.listWebsiteAnalysesForLead(leadId)]); const latest = analyses[0]; return { summary: `${lead.businessName}: ${lead.opportunitySummary}`, strengths: latest?.strengths ?? [], digitalGaps: latest?.digitalGaps ?? [], unknowns: latest?.unknowns ?? (evidence.length ? [] : ["No verified research evidence is stored."]), evidenceReferences: evidence.map((item) => item.id), confidence: lead.researchConfidence ?? "unknown" }; },
   },
   score_lead: {
-    name: "score_lead", description: "Return the lead's stored transparent score and reason. Does not invent missing evidence.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1) }), output: z.object({ score: z.number(), reason: z.string(), evidence: z.string() }), parameters: objectSchema({ leadId: stringProp("Exact CRM lead ID") }),
-    execute: async ({ repositories }, { leadId }) => { const lead = await repositories.leads.getById(leadId); if (!lead) throw new Error("Lead not found"); return { score: lead.score, reason: lead.scoreReason, evidence: lead.reviewCount === null ? "Review count: Unknown" : `Stored review count: ${lead.reviewCount}` }; },
+    name: "score_lead", description: "Return the lead's stored deterministic score, components and evidence references.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1) }), output: z.object({ score: z.number(), reason: z.string(), components: z.array(z.object({ key: z.string(), points: z.number(), reason: z.string(), evidenceIds: z.array(z.string()) })), evidenceIds: z.array(z.string()) }), parameters: objectSchema({ leadId: stringProp("Exact CRM lead ID") }),
+    execute: async ({ repositories }, { leadId }) => { const lead = await repositories.leads.getById(leadId); if (!lead) throw new Error("Lead not found"); return { score: lead.score, reason: lead.scoreReason, components: lead.scoreComponents ?? [], evidenceIds: lead.evidenceIds ?? [] }; },
   },
   draft_outreach: {
     name: "draft_outreach", description: "Create and persist a personalized email draft from stored CRM evidence. This does not send it.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1), subject: z.string().min(1).max(200), body: z.string().min(1).max(5000) }), output: z.object({ id: z.string(), status: z.literal("draft"), recipient: z.string() }), parameters: objectSchema({ leadId: stringProp("Exact lead ID"), subject: stringProp("Specific concise subject"), body: stringProp("Personalized outreach using only verified CRM facts") }),
     execute: async ({ repositories }, { leadId, subject, body }) => { const lead = await repositories.leads.getById(leadId); if (!lead) throw new Error("Lead not found"); const draft = await repositories.interactions.create({ leadId, direction: "outbound", channel: "email", subject, content: body, status: "draft" }); await repositories.activity.create({ eventType: "outreach", title: "Outreach draft created", description: lead.businessName, metadata: { draftId: draft.id, leadId } }); return { id: draft.id, status: "draft" as const, recipient: lead.email ?? "Unknown" }; },
   },
   search_leads: {
-    name: "search_leads", description: "Search an external lead-data provider. No live provider is connected in v0.2, so this reports that limitation without inventing businesses.", permission: "SAFE_AUTOMATIC",
-    input: z.object({ category: z.string().min(1).max(200), location: z.string().min(1).max(200), limit: z.number().int().min(1).max(25).default(10) }),
-    output: z.object({ leads: z.array(leadOutput), connected: z.boolean(), message: z.string() }),
-    parameters: objectSchema({ category: stringProp("Requested business category"), location: stringProp("Requested location"), limit: { type: "integer", minimum: 1, maximum: 25 } }),
-    execute: async () => ({ leads: [], connected: false, message: "Unknown — no external lead-search provider is connected." }),
+    name: "search_leads", description: "Start evidence-first public business research. It discovers, deduplicates and processes a persisted batch without contacting anyone.", permission: "SAFE_AUTOMATIC",
+    input: z.object({ industry: z.string().min(1).max(200), location: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(10), criteria: z.record(z.unknown()).optional() }),
+    output: z.object({ researchRunId: z.string(), status: z.enum(["partial", "completed", "cancelled", "failed"]), discoveredCount: z.number(), verifiedCount: z.number(), analyzedCount: z.number(), qualifiedCount: z.number(), failedCount: z.number(), processedCount: z.number(), message: z.string(), leads: z.array(leadOutput) }),
+    parameters: objectSchema({ industry: stringProp("Target industry"), location: stringProp("Target city/area and country when known"), limit: { type: "integer", minimum: 1, maximum: 50 }, criteria: { type: "object", additionalProperties: true } }, ["industry", "location", "limit"]),
+    execute: async ({ researchService, jarvisRunId, emitProgress }, input) => researchService ? researchService.start({ jarvisRunId: jarvisRunId ?? "", ...input, onProgress: (progress) => emitProgress?.(progress.description, { researchRunId: progress.researchRunId, researchStatus: progress.status, processed: progress.processed, total: progress.total }) }) : ({ researchRunId: "", status: "failed" as const, discoveredCount: 0, verifiedCount: 0, analyzedCount: 0, qualifiedCount: 0, failedCount: 0, processedCount: 0, message: "Live web research is not configured.", leads: [] }),
+  },
+  search_web: {
+    name: "search_web", description: "Search the real public web and return structured, cited results when Live Research is enabled.", permission: "SAFE_AUTOMATIC",
+    input: z.object({ query: z.string().min(2).max(500), location: z.string().max(200).optional(), maxResults: z.number().int().min(1).max(25).default(10) }),
+    output: z.object({ results: z.array(z.object({ title: z.string(), url: z.string().url(), snippet: z.string(), sourceType: z.string() })), error: z.string().optional() }),
+    parameters: objectSchema({ query: stringProp("Focused public web query"), location: stringProp("Optional geographic focus"), maxResults: { type: "integer", minimum: 1, maximum: 25 } }, ["query", "maxResults"]),
+    execute: async ({ researchService }, input) => researchService ? researchService.searchWeb(input) : { results: [], error: "Live web research is not configured." },
+  },
+  continue_research: {
+    name: "continue_research", description: "Resume the next persisted research batch without duplicating completed candidates.", permission: "SAFE_AUTOMATIC",
+    input: z.object({ researchRunId: z.string().min(1) }),
+    output: z.object({ researchRunId: z.string(), status: z.enum(["partial", "completed", "cancelled", "failed"]), discoveredCount: z.number(), verifiedCount: z.number(), analyzedCount: z.number(), qualifiedCount: z.number(), failedCount: z.number(), processedCount: z.number(), message: z.string(), leads: z.array(leadOutput) }),
+    parameters: objectSchema({ researchRunId: stringProp("Persisted research run ID") }),
+    execute: async ({ researchService, emitProgress }, { researchRunId }) => researchService ? researchService.continue({ researchRunId, onProgress: (progress) => emitProgress?.(progress.description, { researchRunId, researchStatus: progress.status, processed: progress.processed, total: progress.total }) }) : ({ researchRunId, status: "failed" as const, discoveredCount: 0, verifiedCount: 0, analyzedCount: 0, qualifiedCount: 0, failedCount: 0, processedCount: 0, message: "Live web research is not configured.", leads: [] }),
+  },
+  cancel_research: {
+    name: "cancel_research", description: "Cancel an active research run while preserving completed evidence.", permission: "SAFE_AUTOMATIC", input: z.object({ researchRunId: z.string().min(1) }), output: z.object({ cancelled: z.literal(true), researchRunId: z.string() }), parameters: objectSchema({ researchRunId: stringProp("Persisted research run ID") }), execute: async ({ researchService }, { researchRunId }) => { if (!researchService) throw new Error("Research unavailable"); await researchService.cancel(researchRunId); return { cancelled: true as const, researchRunId }; },
   },
   get_business_details: {
-    name: "get_business_details", description: "Retrieve external business-provider details. No live provider is connected in v0.2, so fields remain Unknown.", permission: "SAFE_AUTOMATIC",
+    name: "get_business_details", description: "Retrieve stored business-provider details. Use search_web or search_leads for live public research; otherwise fields remain Unknown.", permission: "SAFE_AUTOMATIC",
     input: z.object({ businessName: z.string().min(1).max(300), location: z.string().max(200).optional() }),
     output: z.object({ businessName: z.string(), details: z.string(), connected: z.boolean() }),
     parameters: objectSchema({ businessName: stringProp("Business name to look up"), location: stringProp("Location when known") }, ["businessName"]),
     execute: async (_context, { businessName }) => ({ businessName, details: "Unknown — no external business-data provider is connected.", connected: false }),
   },
   analyze_website: {
-    name: "analyze_website", description: "Analyze a website only when a real provider is connected. Currently returns Unknown.", permission: "SAFE_AUTOMATIC", input: z.object({ url: z.string().url() }), output: z.object({ result: z.string(), connected: z.boolean() }), parameters: objectSchema({ url: stringProp("Verified website URL") }), execute: async () => ({ result: "Unknown — website analysis provider is not connected.", connected: false }),
+    name: "analyze_website", description: "Safely fetch and re-analyze a lead's public website, storing new historical evidence.", permission: "SAFE_AUTOMATIC", input: z.object({ leadId: z.string().min(1), url: z.string().url() }), output: z.object({ message: z.string(), analysis: z.unknown().optional() }), parameters: objectSchema({ leadId: stringProp("Exact CRM lead ID"), url: stringProp("Public HTTP(S) website URL") }), execute: async ({ researchService, emitProgress }, input) => researchService ? researchService.analyzeWebsite({ ...input, onProgress: (progress) => emitProgress?.(progress.description) }) : ({ message: "Live web research is not configured." }),
   },
   send_email: {
     name: "send_email", description: "Send an external email draft. Requires explicit user approval and a connected provider.", permission: "REQUIRES_USER_APPROVAL", input: z.object({ draftId: z.string().min(1), recipient: z.string().email().optional(), subject: z.string().optional(), preview: z.string().optional() }), output: z.object({ sent: z.boolean(), reason: z.string() }), parameters: objectSchema({ draftId: stringProp("Stored draft ID"), recipient: stringProp("Recipient email when known"), subject: stringProp("Email subject when known"), preview: stringProp("Email preview for approval when known") }, ["draftId"]), execute: async () => ({ sent: false, reason: "Email provider not connected." }),

@@ -10,4 +10,9 @@ export const settingsSchema = z.object({
   companyServices: z.array(z.string().trim().min(1).max(120)).max(30), companyDescription: z.string().trim().max(3000),
   targetIndustries: z.array(z.string().trim().min(1).max(120)).max(30), targetLocations: z.array(z.string().trim().min(1).max(120)).max(30),
   defaultLanguage: z.string().trim().min(2).max(20), minimumLeadScore: z.number().int().min(0).max(100),
+  researchMaxLeads: z.number().int().min(1).max(50),
+  researchMaxPagesPerSite: z.number().int().min(1).max(5),
+  researchFetchTimeoutMs: z.number().int().min(2000).max(20000),
+  researchMaxConcurrency: z.number().int().min(1).max(5),
+  researchAiAnalysisEnabled: z.boolean(),
 });

@@ -1,10 +1,10 @@
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadStatus, RunStatus, Task } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ResearchCandidate, ResearchRun, ResearchSource, ResearchStatus, RunStatus, Task, WebsiteAnalysis } from "../../types";
 
 export interface LeadRepository {
   list(): Promise<Lead[]>;
   getById(id: string): Promise<Lead | null>;
   create(input: Omit<Lead, "id" | "lastActivity">): Promise<Lead>;
-  update(id: string, patch: Partial<Pick<Lead, "businessName" | "category" | "city" | "country" | "website" | "email" | "phone" | "status" | "score" | "scoreReason" | "opportunitySummary" | "reviewCount">>): Promise<Lead>;
+  update(id: string, patch: Partial<Pick<Lead, "businessName" | "category" | "city" | "country" | "website" | "email" | "phone" | "status" | "score" | "scoreReason" | "opportunitySummary" | "reviewCount" | "scoreComponents" | "evidenceIds" | "researchConfidence" | "lastResearchedAt">>): Promise<Lead>;
   delete(id: string): Promise<void>;
   search(query: string, limit?: number): Promise<Lead[]>;
 }
@@ -49,6 +49,27 @@ export interface SettingsRepository {
   upsert(settings: Omit<BusinessSettings, "userId">): Promise<BusinessSettings>;
 }
 
+export interface ResearchRepository {
+  createRun(input: { jarvisRunId: string | null; query: string; industry: string; location: string; requestedLimit: number; config: Record<string, unknown> }): Promise<ResearchRun>;
+  getRun(id: string): Promise<ResearchRun | null>;
+  updateRun(id: string, patch: Partial<Pick<ResearchRun, "status" | "discoveredCount" | "verifiedCount" | "analyzedCount" | "qualifiedCount" | "failedCount" | "processedCount" | "completedAt">>): Promise<ResearchRun>;
+  addCandidates(runId: string, candidates: Array<Omit<ResearchCandidate, "id" | "researchRunId" | "leadId" | "error" | "createdAt">>): Promise<ResearchCandidate[]>;
+  listCandidates(runId: string): Promise<ResearchCandidate[]>;
+  listPendingCandidates(runId: string, limit: number): Promise<ResearchCandidate[]>;
+  updateCandidate(id: string, patch: Partial<Pick<ResearchCandidate, "status" | "officialWebsite" | "phone" | "email" | "leadId" | "error">>): Promise<ResearchCandidate>;
+  claimContinuation(id: string): Promise<ResearchRun>;
+  cancel(id: string): Promise<ResearchRun>;
+}
+
+export interface EvidenceRepository {
+  addSource(input: Omit<ResearchSource, "id" | "createdAt" | "retrievedAt"> & { retrievedAt?: string }): Promise<ResearchSource>;
+  addEvidence(input: Omit<LeadEvidence, "id" | "createdAt">): Promise<LeadEvidence>;
+  addWebsiteAnalysis(input: Omit<WebsiteAnalysis, "id" | "retrievedAt"> & { retrievedAt?: string }): Promise<WebsiteAnalysis>;
+  listSourcesForLead(leadId: string): Promise<ResearchSource[]>;
+  listEvidenceForLead(leadId: string): Promise<LeadEvidence[]>;
+  listWebsiteAnalysesForLead(leadId: string): Promise<WebsiteAnalysis[]>;
+}
+
 export interface Repositories {
   leads: LeadRepository;
   interactions: InteractionRepository;
@@ -57,6 +78,8 @@ export interface Repositories {
   approvals: ApprovalRepository;
   activity: ActivityRepository;
   settings: SettingsRepository;
+  research: ResearchRepository;
+  evidence: EvidenceRepository;
 }
 
 export type LeadUpdate = { status?: LeadStatus };

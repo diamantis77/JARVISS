@@ -5,6 +5,7 @@ import { OpenAIJarvisProvider } from "@/lib/ai/openai-provider";
 import { isOpenAiConfigured } from "@/lib/config/runtime";
 import { runJarvisLoop } from "@/lib/jarvis/tool-loop";
 import { checkRateLimit } from "@/lib/security/rate-limit";
+import { createResearchService } from "@/lib/research/factory";
 
 export async function POST(request: Request) {
   const context = await createRequestRepositories();
@@ -17,10 +18,11 @@ export async function POST(request: Request) {
 
   const aiMode = context.mode === "live" && isOpenAiConfigured() ? "openai" : "demo";
   const provider = aiMode === "openai" ? new OpenAIJarvisProvider() : new DemoJarvisProvider();
+  const researchService = createResearchService(context.repositories, context.mode);
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      void runJarvisLoop({ command: parsed.data.command, mode: context.mode, repositories: context.repositories, provider, onEvent: (event) => { controller.enqueue(encoder.encode(`${JSON.stringify({ ...event, mode: context.mode, aiMode })}\n`)); } })
+      void runJarvisLoop({ command: parsed.data.command, mode: context.mode, repositories: context.repositories, provider, researchService, onEvent: (event) => { controller.enqueue(encoder.encode(`${JSON.stringify({ ...event, mode: context.mode, aiMode })}\n`)); } })
         .catch(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message: "JARVIS could not complete this run." })}\n`)))
         .finally(() => controller.close());
     },
