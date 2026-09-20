@@ -1,4 +1,3 @@
-import "server-only";
 import OpenAI from "openai";
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
 import { z } from "zod";

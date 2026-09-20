@@ -1,0 +1,8 @@
+import { OAuth2Client, type TokenPayload } from "google-auth-library";
+
+export type PubSubClaims = Pick<TokenPayload, "aud" | "email" | "email_verified" | "exp" | "iss" | "sub">;
+type TokenVerifier = { verifyIdToken(input: { idToken: string; audience: string }): Promise<{ getPayload(): TokenPayload | undefined }> };
+
+export function validatePubSubClaims(payload: PubSubClaims | undefined, expectedAudience: string, allowedServiceAccount: string, nowSeconds = Math.floor(Date.now() / 1000)) { if (!payload) throw new Error("Missing verified Pub/Sub claims"); if (payload.aud !== expectedAudience) throw new Error("Wrong Pub/Sub audience"); if (payload.exp === undefined || payload.exp <= nowSeconds) throw new Error("Expired Pub/Sub token"); if (payload.iss !== "accounts.google.com" && payload.iss !== "https://accounts.google.com") throw new Error("Wrong Pub/Sub issuer"); if (payload.email !== allowedServiceAccount || payload.email_verified !== true) throw new Error("Unknown Pub/Sub service account"); return payload; }
+
+export async function verifyPubSubRequest(request: Request, verifier: TokenVerifier = new OAuth2Client()) { const audience = process.env.GOOGLE_PUBSUB_EXPECTED_AUDIENCE; const serviceAccount = process.env.GOOGLE_PUBSUB_ALLOWED_SERVICE_ACCOUNT; if (!audience || !serviceAccount) throw new Error("Pub/Sub authentication is not configured"); const authorization = request.headers.get("authorization"); const match = authorization?.match(/^Bearer ([A-Za-z0-9._-]+)$/); if (!match) throw new Error("Missing Pub/Sub bearer token"); const ticket = await verifier.verifyIdToken({ idToken: match[1], audience }); return validatePubSubClaims(ticket.getPayload(), audience, serviceAccount); }

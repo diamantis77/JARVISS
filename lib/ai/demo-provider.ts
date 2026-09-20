@@ -12,6 +12,7 @@ export class DemoJarvisProvider implements JarvisAiProvider {
       return { responseId, toolCalls: [], text: greek ? "Ολοκλήρωσα την ασφαλή ενέργεια χρησιμοποιώντας μόνο τα διαθέσιμα demo δεδομένα. Τα αποτελέσματα εμφανίζονται στο run και δεν έγινε καμία πραγματική εξωτερική ενέργεια." : "I completed the safe operation using only the available demo data. The result is recorded in this run; no real external action occurred." };
     }
     const lower = this.command.toLowerCase();
+    if (/brief|briefing|ενημέρωσ|σύνοψη ημέρας/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "get_daily_brief", arguments: "{}" }] };
     if (/send it|στείλ|αποστολ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "send_email", arguments: JSON.stringify({ draftId: "demo-draft", recipient: "demo@example.invalid", subject: "Demo outreach", body: "Demo message preview — no email provider is connected.", threadId: null, inReplyTo: null }) }] };
     if (/email|mail|ηλεκτρον|μήνυμ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "list_email_threads", arguments: JSON.stringify({ maxResults: 5 }) }] };
     if (/calendar|schedule|tomorrow|ημερολόγ|πρόγραμμ|αύριο/.test(lower)) {

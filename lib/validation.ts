@@ -19,4 +19,6 @@ export const settingsSchema = z.object({
   jarvisVoice: z.enum(["marin", "cedar", "coral", "alloy"]),
   voiceMode: z.enum(["conversation", "push_to_talk"]),
   timezone: z.string().trim().min(1).max(100),
+  dailyBriefEnabled: z.boolean(),
+  dailyBriefTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
 });

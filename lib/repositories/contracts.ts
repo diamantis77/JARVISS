@@ -1,4 +1,4 @@
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ProviderCapability, ProviderConnection, ProviderSyncState, ResearchCandidate, ResearchRun, ResearchSource, RunStatus, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BackgroundJob, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, OperationsSnapshot, ProviderCapability, ProviderConnection, ProviderHealth, ProviderSyncState, ProviderWatchChannel, ResearchCandidate, ResearchRun, ResearchSource, RunStatus, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 
 export interface LeadRepository {
   list(): Promise<Lead[]>;
@@ -12,6 +12,7 @@ export interface LeadRepository {
 export interface InteractionRepository {
   listForLead(leadId: string): Promise<Interaction[]>;
   getById(id: string): Promise<Interaction | null>;
+  getByProviderMessageId(provider: string, messageId: string): Promise<Interaction | null>;
   create(input: Omit<Interaction, "id" | "createdAt">): Promise<Interaction>;
   updateStatus(id: string, status: string): Promise<Interaction>;
 }
@@ -87,6 +88,12 @@ export interface ConnectionRepository {
   disconnect(id: string): Promise<ProviderConnection>;
   getSyncState(connectionId: string, capability: ProviderCapability): Promise<ProviderSyncState | null>;
   upsertSyncState(state: ProviderSyncState): Promise<ProviderSyncState>;
+  listWatchChannels(capability?: ProviderCapability): Promise<ProviderWatchChannel[]>;
+  getWatchChannel(channelId: string): Promise<ProviderWatchChannel | null>;
+  upsertWatchChannel(input: Omit<ProviderWatchChannel, "id">): Promise<ProviderWatchChannel>;
+  updateWatchChannel(id: string, patch: Partial<Omit<ProviderWatchChannel, "id" | "connectionId" | "capability">>): Promise<ProviderWatchChannel>;
+  listHealth(): Promise<ProviderHealth[]>;
+  upsertHealth(health: ProviderHealth): Promise<ProviderHealth>;
 }
 
 export interface NotificationRepository {
@@ -94,6 +101,13 @@ export interface NotificationRepository {
   create(input: Omit<JarvisNotification, "id" | "readAt" | "dismissedAt" | "createdAt">): Promise<JarvisNotification>;
   markRead(id: string): Promise<JarvisNotification>;
   dismiss(id: string): Promise<JarvisNotification>;
+}
+
+export interface OperationsRepository {
+  snapshot(): Promise<OperationsSnapshot>;
+  listJobs(limit?: number): Promise<BackgroundJob[]>;
+  retryJob(id: string): Promise<BackgroundJob>;
+  cancelJob(id: string): Promise<BackgroundJob>;
 }
 
 export interface Repositories {
@@ -109,6 +123,7 @@ export interface Repositories {
   voice: VoiceRepository;
   connections: ConnectionRepository;
   notifications: NotificationRepository;
+  operations: OperationsRepository;
 }
 
 export type LeadUpdate = { status?: LeadStatus };

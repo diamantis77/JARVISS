@@ -9,6 +9,10 @@ export type VoiceState = "idle" | "requesting_microphone" | "connecting" | "list
 export type EvidenceConfidence = "verified" | "high" | "medium" | "low" | "unknown";
 export type ResearchStatus = "pending" | "running" | "partial" | "completed" | "cancelled" | "failed";
 export type ResearchCandidateStatus = "discovered" | "verified" | "analyzed" | "qualified" | "failed" | "skipped";
+export type BackgroundJobType = "gmail_sync" | "gmail_watch_renewal" | "calendar_sync" | "calendar_watch_renewal" | "provider_health_check" | "research_continue" | "notification_process" | "notification_cleanup" | "provider_reconciliation" | "daily_brief";
+export type BackgroundJobStatus = "pending" | "scheduled" | "running" | "retrying" | "completed" | "failed" | "cancelled" | "dead_letter";
+export type ProviderHealthStatus = "healthy" | "degraded" | "needs_reconnect" | "watch_expiring" | "disconnected" | "error";
+export type InternalEventType = "EMAIL_RECEIVED" | "LEAD_REPLIED" | "HOT_LEAD_DETECTED" | "MEETING_REQUEST_DETECTED" | "MEETING_STARTING_SOON" | "RESEARCH_COMPLETED" | "APPROVAL_PENDING" | "PROVIDER_DISCONNECTED" | "DAILY_BRIEF_READY";
 
 export interface Lead {
   id: string;
@@ -133,6 +137,8 @@ export interface BusinessSettings {
   jarvisVoice: "marin" | "cedar" | "coral" | "alloy";
   voiceMode: "conversation" | "push_to_talk";
   timezone: string;
+  dailyBriefEnabled: boolean;
+  dailyBriefTime: string;
 }
 
 export interface VoiceSession {
@@ -202,7 +208,7 @@ export interface CalendarEventRecord {
 
 export interface JarvisNotification {
   id: string;
-  type: "EMAIL_REPLY" | "HOT_LEAD_REPLY" | "APPROVAL_REQUIRED" | "MEETING_REQUEST" | "UPCOMING_MEETING" | "RESEARCH_COMPLETED" | "PROVIDER_ERROR" | "VOICE_ERROR";
+  type: "EMAIL_REPLY" | "HOT_LEAD_REPLY" | "APPROVAL_REQUIRED" | "MEETING_REQUEST" | "UPCOMING_MEETING" | "RESEARCH_COMPLETED" | "PROVIDER_ERROR" | "VOICE_ERROR" | "DAILY_BRIEF";
   priority: NotificationPriority;
   title: string;
   body: string;
@@ -221,6 +227,73 @@ export interface ProviderSyncState {
   watchExpiration: string | null;
   lastSuccessfulSyncAt: string | null;
   lastNotificationId: string | null;
+}
+
+export interface BackgroundJob {
+  id: string;
+  userId: string | null;
+  jobType: BackgroundJobType;
+  status: BackgroundJobStatus;
+  payload: Record<string, unknown>;
+  priority: number;
+  attemptCount: number;
+  maxAttempts: number;
+  scheduledFor: string;
+  lockedAt: string | null;
+  lockedBy: string | null;
+  lastError: string | null;
+  deduplicationKey: string | null;
+  correlationId: string;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface ProviderWatchChannel {
+  id: string;
+  connectionId: string;
+  capability: ProviderCapability;
+  channelId: string | null;
+  resourceId: string | null;
+  calendarId: string | null;
+  verificationTokenHash: string | null;
+  expiration: string | null;
+  status: "active" | "expired" | "stopped" | "error";
+  lastRenewalAttemptAt: string | null;
+  lastRenewalSuccessAt: string | null;
+  renewalError: string | null;
+}
+
+export interface ProviderHealth {
+  connectionId: string;
+  capability: ProviderCapability;
+  status: ProviderHealthStatus;
+  lastSuccessfulApiCallAt: string | null;
+  lastSyncAt: string | null;
+  lastWebhookAt: string | null;
+  watchExpiration: string | null;
+  consecutiveFailures: number;
+  lastErrorCategory: string | null;
+  lastErrorSummary: string | null;
+}
+
+export interface InternalEvent {
+  id: string;
+  userId: string;
+  eventType: InternalEventType;
+  payload: Record<string, unknown>;
+  correlationId: string;
+  deduplicationKey: string | null;
+  occurredAt: string;
+  processedAt: string | null;
+}
+
+export interface OperationsSnapshot {
+  jobs: BackgroundJob[];
+  health: ProviderHealth[];
+  schedulerLastSeenAt: string | null;
+  workerLastSeenAt: string | null;
+  metrics: Record<string, number>;
 }
 
 export interface ResearchSource {

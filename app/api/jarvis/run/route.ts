@@ -4,13 +4,15 @@ import { DemoJarvisProvider } from "@/lib/ai/demo-provider";
 import { OpenAIJarvisProvider } from "@/lib/ai/openai-provider";
 import { isOpenAiConfigured } from "@/lib/config/runtime";
 import { runJarvisLoop } from "@/lib/jarvis/tool-loop";
-import { checkRateLimit } from "@/lib/security/rate-limit";
+import { checkSharedRateLimit } from "@/lib/security/distributed-rate-limit";
 import { createResearchService } from "@/lib/research/factory";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { SupabaseJobQueue } from "@/lib/jobs/supabase-queue";
 
 export async function POST(request: Request) {
   const context = await createRequestRepositories();
   if (!context) return Response.json({ error: "Your session has expired. Please sign in again." }, { status: 401 });
-  const rate = checkRateLimit(`jarvis:${context.userId}`);
+  const rate = await checkSharedRateLimit(context.mode, `jarvis:${context.userId}`);
   if (!rate.allowed) return Response.json({ error: "JARVIS is receiving too many commands. Please wait a moment." }, { status: 429, headers: { "Retry-After": String(rate.retryAfter) } });
   const raw = await request.json().catch(() => null);
   const voiceParsed = raw && typeof raw === "object" && "source" in raw ? voiceCommandSchema.safeParse(raw) : null;
@@ -32,6 +34,13 @@ export async function POST(request: Request) {
   const stream = new ReadableStream({
     start(controller) {
       void runJarvisLoop({ command, mode: context.mode, repositories: context.repositories, provider, researchService, inputSource: voice ? "voice" : "text", voiceSessionId: voice?.voiceSessionId, voiceCommandId: voice?.voiceCommandId, onEvent: (event) => { controller.enqueue(encoder.encode(`${JSON.stringify({ ...event, mode: context.mode, aiMode })}\n`)); } })
+        .then(async ({ run }) => {
+          const researchRunId = typeof run.context?.researchRunId === "string" ? run.context.researchRunId : null;
+          if (context.mode === "live" && researchRunId && run.context?.researchStatus === "partial") {
+            const processed = Number(run.context.researchProcessed ?? 0);
+            await new SupabaseJobQueue(createAdminClient()).enqueue({ userId: context.userId, jobType: "research_continue", priority: 35, scheduledFor: new Date(Date.now() + 30_000).toISOString(), deduplicationKey: `research-continuation:${researchRunId}:${processed}`, payload: { researchRunId } }).catch(() => undefined);
+          }
+        })
         .catch(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message: "JARVIS could not complete this run." })}\n`)))
         .finally(() => controller.close());
     },

@@ -1,6 +1,7 @@
 import type { Repositories } from "./contracts";
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ProviderConnection, ProviderSyncState, ResearchCandidate, ResearchRun, ResearchSource, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ProviderConnection, ProviderHealth, ProviderSyncState, ProviderWatchChannel, ResearchCandidate, ResearchRun, ResearchSource, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 import { demoActivities, demoApproval, demoLeads, demoRun, demoTasks } from "../demo-data";
+import { MemoryJobQueue } from "../jobs/memory-queue";
 
 export function createDemoRepositories(): Repositories {
   const leads: Lead[] = structuredClone(demoLeads);
@@ -18,8 +19,11 @@ export function createDemoRepositories(): Repositories {
   const voiceTranscripts: VoiceTranscript[] = [];
   let googleConnection: ProviderConnection | null = null;
   const syncStates: ProviderSyncState[] = [];
+  const watchChannels: ProviderWatchChannel[] = [];
+  const providerHealth: ProviderHealth[] = [];
+  const jobQueue = new MemoryJobQueue();
   const notifications: JarvisNotification[] = [{ id: "notification-demo-reply", type: "EMAIL_REPLY", priority: "important", title: "Demo reply from Papadopoulos Dental", body: "Fictional customer asked about availability tomorrow.", entityType: "email_thread", entityId: "demo-thread-1", readAt: null, dismissedAt: null, metadata: { demo: true }, createdAt: new Date().toISOString() }];
-  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation", timezone: "Europe/Athens" };
+  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation", timezone: "Europe/Athens", dailyBriefEnabled: false, dailyBriefTime: "08:30" };
   return {
     leads: {
       async list() { return [...leads].sort((a, b) => b.score - a.score); },
@@ -32,6 +36,7 @@ export function createDemoRepositories(): Repositories {
     interactions: {
       async listForLead(leadId) { return interactions.filter((item) => item.leadId === leadId); },
       async getById(id) { return interactions.find((item) => item.id === id) ?? null; },
+      async getByProviderMessageId(provider, messageId) { return interactions.find((item) => item.provider === provider && item.providerMessageId === messageId) ?? null; },
       async create(input) { const item = { ...input, id: `interaction_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; interactions.push(item); return item; },
       async updateStatus(id, status) { const item = interactions.find((entry) => entry.id === id); if (!item) throw new Error("Interaction not found"); item.status = status; return item; },
     },
@@ -98,12 +103,24 @@ export function createDemoRepositories(): Repositories {
       async disconnect(id) { if (!googleConnection || googleConnection.id !== id) throw new Error("Connection not found"); googleConnection = { ...googleConnection, status: "disconnected", accessTokenEncrypted: null, refreshTokenEncrypted: null, tokenExpiresAt: null }; return googleConnection; },
       async getSyncState(connectionId, capability) { return syncStates.find((state) => state.connectionId === connectionId && state.capability === capability) ?? null; },
       async upsertSyncState(state) { const index = syncStates.findIndex((item) => item.connectionId === state.connectionId && item.capability === state.capability); if (index >= 0) syncStates[index] = state; else syncStates.push(state); return state; },
+      async listWatchChannels(capability) { return watchChannels.filter((item) => !capability || item.capability === capability); },
+      async getWatchChannel(channelId) { return watchChannels.find((item) => item.channelId === channelId) ?? null; },
+      async upsertWatchChannel(input) { const index = watchChannels.findIndex((item) => item.connectionId === input.connectionId && item.capability === input.capability && item.channelId === input.channelId); const item = { ...input, id: index >= 0 ? watchChannels[index].id : `watch_${crypto.randomUUID()}` }; if (index >= 0) watchChannels[index] = item; else watchChannels.push(item); return item; },
+      async updateWatchChannel(id, patch) { const item = watchChannels.find((entry) => entry.id === id); if (!item) throw new Error("Watch not found"); Object.assign(item, patch); return item; },
+      async listHealth() { return [...providerHealth]; },
+      async upsertHealth(health) { const index = providerHealth.findIndex((item) => item.connectionId === health.connectionId && item.capability === health.capability); if (index >= 0) providerHealth[index] = health; else providerHealth.push(health); return health; },
     },
     notifications: {
       async list(limit = 20, unreadOnly = false) { return notifications.filter((item) => !item.dismissedAt && (!unreadOnly || !item.readAt)).slice(0, limit); },
       async create(input) { const dedupe = input.metadata.dedupeKey; const existing = typeof dedupe === "string" ? notifications.find((item) => item.metadata.dedupeKey === dedupe) : null; if (existing) return existing; const item: JarvisNotification = { ...input, id: `notification_${crypto.randomUUID()}`, readAt: null, dismissedAt: null, createdAt: new Date().toISOString() }; notifications.unshift(item); return item; },
       async markRead(id) { const item = notifications.find((entry) => entry.id === id); if (!item) throw new Error("Notification not found"); item.readAt = new Date().toISOString(); return item; },
       async dismiss(id) { const item = notifications.find((entry) => entry.id === id); if (!item) throw new Error("Notification not found"); item.dismissedAt = new Date().toISOString(); return item; },
+    },
+    operations: {
+      async listJobs(limit = 100) { return jobQueue.listJobs("demo-user", limit); },
+      async snapshot() { const jobs = await jobQueue.listJobs("demo-user", 100); return { jobs, health: [...providerHealth], schedulerLastSeenAt: null, workerLastSeenAt: null, metrics: { jobs_pending: jobs.filter((job) => ["pending", "scheduled", "retrying"].includes(job.status)).length, jobs_failed: jobs.filter((job) => ["failed", "dead_letter"].includes(job.status)).length, jobs_completed: jobs.filter((job) => job.status === "completed").length } }; },
+      async retryJob(id) { const job = await jobQueue.getJob(id, "demo-user"); if (!job) throw new Error("Job not found"); return jobQueue.enqueue({ userId: "demo-user", jobType: job.jobType, payload: job.payload, deduplicationKey: `${job.deduplicationKey ?? job.id}:retry:${Date.now()}` }); },
+      async cancelJob(id) { return jobQueue.cancel(id, "demo-user"); },
     },
   };
 }

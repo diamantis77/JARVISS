@@ -48,6 +48,8 @@ export function SettingsForm({ initial, mode, onboarding = false }: { initial: B
       <label>JARVIS voice<select value={form.jarvisVoice} onChange={(event) => update("jarvisVoice", event.target.value)}><option value="marin">Marin</option><option value="cedar">Cedar</option><option value="coral">Coral</option><option value="alloy">Alloy</option></select></label>
       <label>Interaction mode<select value={form.voiceMode} onChange={(event) => update("voiceMode", event.target.value)}><option value="conversation">Conversation</option><option value="push_to_talk">Push to talk</option></select></label>
     </div>
+    <p className="panel-title" style={{ marginTop: 26 }}>Daily brief</p>
+    <div className="settings-grid"><label className="wide checkbox-label"><input type="checkbox" checked={form.dailyBriefEnabled} onChange={(event) => update("dailyBriefEnabled", event.target.checked)} /> Enable morning briefing notification</label><label>Brief time<input type="time" value={form.dailyBriefTime} onChange={(event) => update("dailyBriefTime", event.target.value)} /></label><label>Brief timezone<input value={form.timezone} readOnly /></label></div>
     {message && <div className="auth-message" role="status">{message}</div>}
     <button className="primary" disabled={busy} style={{ marginTop: 20 }} type="submit">{busy ? "Saving…" : onboarding ? "JARVIS is ready" : "Save business memory"}</button>
   </form>;

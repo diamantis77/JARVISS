@@ -1,4 +1,3 @@
-import "server-only";
 import type { Repositories } from "../repositories/contracts";
 import { scoreLeadV2, type EvidenceFact } from "../scoring";
 import type { EvidenceConfidence, Lead, LeadEvidence, ResearchCandidate, ResearchRun, WebsiteAnalysis } from "../../types";

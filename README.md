@@ -1,6 +1,109 @@
-# JARVIS v0.5 · Google Workspace + Notifications
+# JARVIS v0.6 · Production Operations
 
-JARVIS is an authenticated, persistent AI business command center. v0.5 adds least-privilege Google OAuth, Gmail and Calendar providers, duplicate-safe synchronization, and a first-class notification center while preserving the v0.4 voice, research, RLS, tool loop, and approval gates.
+JARVIS is an authenticated, persistent AI business command center. v0.6 adds durable PostgreSQL-backed operations, workers, scheduling, retries, dead letters, authenticated Pub/Sub push, incremental synchronization, provider health, meeting reminders, morning briefs, diagnostics, and an Operations view while preserving all v0.5 approval and privacy boundaries.
+
+## Production operations architecture
+
+Provider notifications and recurring schedules never depend on an open browser or process-local job state:
+
+```text
+Google signal / scheduler / user diagnostic
+  → validated server boundary
+  → durable background_jobs row with deterministic deduplication key
+  → atomic PostgreSQL claim (FOR UPDATE SKIP LOCKED)
+  → leased worker execution
+  → completed / bounded retry / dead_letter
+  → provider health, internal event, notification and operation log
+```
+
+`background_jobs` is provider-neutral. Claims are performed by the `claim_background_job` database function, available only to the Supabase service role. Workers record a unique attempt, periodically extend the durable lease, and only complete a job while they still own its `locked_by` value. A dead worker's stale lease is reclaimable. Multiple instances can therefore run safely without process-local locks.
+
+### Job lifecycle and retries
+
+Statuses are `pending`, `scheduled`, `running`, `retrying`, `completed`, `failed`, `cancelled`, and `dead_letter`. Retryable network, 429, and temporary 5xx failures receive bounded exponential backoff with jitter (approximately 1 minute, 5 minutes, 15 minutes, and 1 hour). Credentials, permission failures, and malformed payloads are not retried indefinitely. Exhausted jobs remain inspectable in **System / Operations** and create a safe user notification without raw provider errors.
+
+Deterministic keys cover Pub/Sub message IDs, Calendar channel/message numbers, provider history checkpoints, meeting reminders, watch renewal windows, reconciliation windows, daily briefs, internal events, and notifications. Existing approval-bound email and Calendar mutations remain synchronous and at-most-once; background analysis can summarize, classify, suggest, or draft but cannot approve or send anything.
+
+### Worker and scheduler
+
+```powershell
+npm run worker          # continuously claims durable work
+npm run worker:once     # one claim, useful for development and health checks
+npm run scheduler       # scans recurring work every minute
+npm run scheduler:once  # one durable scheduling pass
+```
+
+Both processes identify themselves, publish health heartbeats, handle `SIGINT`/`SIGTERM`, stop claiming new work during shutdown, and print structured safe status. With no Supabase configuration they exit in clearly labelled Demo Mode without contacting providers.
+
+The platform-neutral scheduler enqueues watch renewal 48 hours before risk, provider health checks, hourly bounded reconciliation, daily cleanup, and user-configured morning briefs. Production must run the worker and scheduler as separately supervised services; localhost is not represented as production cron infrastructure.
+
+### Gmail production flow
+
+Gmail `watch` publishes to Cloud Pub/Sub. The push subscription sends a Google-signed OIDC JWT. `/api/webhooks/google/gmail` verifies the signature through Google's auth library, issuer, exact audience, expiration, verified email claim, and exact allowed service-account identity. It validates the Pub/Sub envelope, enqueues one `gmail_sync` job per Pub/Sub message ID, and acknowledges immediately. The worker later uses `history.list` from the persisted checkpoint. The checkpoint advances only after every selected message is processed; an expired history ID triggers a bounded seven-day reconciliation rather than a full mailbox download.
+
+Configure an authenticated push subscription with:
+
+```text
+Push endpoint: https://YOUR_HOST/api/webhooks/google/gmail
+OIDC audience: GOOGLE_PUBSUB_EXPECTED_AUDIENCE (normally the exact endpoint URL)
+OIDC service account: GOOGLE_PUBSUB_ALLOWED_SERVICE_ACCOUNT
+```
+
+Grant the Pub/Sub service agent `roles/iam.serviceAccountTokenCreator` on the selected push-auth service account, and grant the creator `iam.serviceAccounts.actAs`. A shared query token is not accepted as a replacement for signed OIDC authentication.
+
+```powershell
+gcloud pubsub topics add-iam-policy-binding projects/PROJECT_ID/topics/TOPIC_ID --member="serviceAccount:gmail-api-push@system.gserviceaccount.com" --role="roles/pubsub.publisher"
+gcloud pubsub subscriptions create jarvis-gmail-push --topic="projects/PROJECT_ID/topics/TOPIC_ID" --push-endpoint="https://YOUR_HOST/api/webhooks/google/gmail" --push-auth-service-account="jarvis-pubsub-push@PROJECT_ID.iam.gserviceaccount.com" --push-auth-token-audience="https://YOUR_HOST/api/webhooks/google/gmail"
+gcloud iam service-accounts add-iam-policy-binding "jarvis-pubsub-push@PROJECT_ID.iam.gserviceaccount.com" --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com" --role="roles/iam.serviceAccountTokenCreator"
+```
+
+### Calendar production flow
+
+Every Calendar watch uses a new random channel ID and channel token; only its SHA-256 token hash is stored. Channel ID, resource ID, token hash, expiration, connection, renewal attempt/success, and safe renewal error are persisted. The webhook matches all channel metadata against active durable state, enqueues `calendar_sync`, and returns quickly. Renewing a channel creates the replacement first and then stops the old Google channel where supported.
+
+Calendar synchronization persists Google's `nextSyncToken`, follows bounded pagination, processes changes before advancing the token, and handles `410 Gone` with a bounded initial reconciliation. Timed meetings enqueue a duplicate-safe reminder job for 15 minutes before start.
+
+### Provider health and observability
+
+Settings shows connection diagnostics, granted capabilities, refresh-token presence without revealing it, token expiry, last sync, watch expiry, and safe Gmail/Calendar read tests. **System / Operations** shows provider health, running/scheduled/failed/dead-letter/recent jobs, attempts, worker/scheduler heartbeats, safe errors, retry and cancel actions, and compact metrics. Correlation IDs link webhook signals, jobs, provider processing, internal events, interactions, and notifications. Logs intentionally exclude tokens, keys, email bodies, and private Calendar descriptions.
+
+Completed operational jobs and logs default to 30-day retention. Dead letters and business history are retained. Cleanup never removes CRM interactions, approvals, leads, or business evidence.
+
+### Morning brief
+
+Settings provides Daily Brief enabled/time/timezone. The scheduler creates one idempotent `daily_brief` job per local business day. The resulting JARVIS notification summarizes important notifications, meetings, high-priority leads, open tasks, and approvals. `get_daily_brief` provides the same real stored briefing on demand through text or voice without taking an external action.
+
+### Production deployment checklist
+
+1. Deploy the application behind public HTTPS and run migrations 0001 through `0006_v06_production_operations.sql` in order.
+2. Configure Supabase public credentials only for the app; provide `SUPABASE_SERVICE_ROLE_KEY` only to the application server, trusted webhook runtime, worker, and scheduler.
+3. Set the Google OAuth variables and a stable 32-byte token-encryption key.
+4. Configure the Gmail Pub/Sub topic and authenticated push subscription with the exact audience and allowed service-account email.
+5. Grant Gmail's publisher identity permission on the topic and Pub/Sub's service agent token-creator permission for the push identity.
+6. Configure `GOOGLE_CALENDAR_WEBHOOK_BASE_URL` to the same public HTTPS deployment.
+7. Start at least one supervised `npm run worker` process and exactly one or more safely duplicated `npm run scheduler` processes.
+8. Use Settings diagnostics, then inspect System / Operations for worker and scheduler heartbeats.
+9. Run `npm run scheduler:once`, `npm run worker:once`, renew both watches, send a duplicate test signal, and verify that only one job/notification is produced.
+10. Configure production alerting around dead letters, `needs_reconnect`, expiring watches, and missing runtime heartbeats.
+
+### Tests
+
+```powershell
+npm run typecheck
+npm run lint
+npm test
+npm run build
+
+# Start the app separately, then:
+npm run test:e2e
+
+# Explicit read-only dedicated Google test account only:
+$env:RUN_LIVE_GOOGLE_TESTS='true'
+$env:GOOGLE_LIVE_TEST_REFRESH_TOKEN='...'
+npm run test:live-google
+```
+
+Live Google tests are skipped by default and never send email or mutate Calendar data. Any future write test must use an additional explicit opt-in flag.
 
 ## Google Workspace architecture
 
@@ -25,17 +128,17 @@ Calendar reads are safe automatic tools. Create, update, and delete tools always
 3. Create an OAuth 2.0 Client ID of type **Web application**.
 4. Add the exact local redirect URI: `http://127.0.0.1:3000/api/integrations/google/callback`. Add the production HTTPS equivalent before deployment.
 5. Put the client ID/secret in `.env.local`. Generate `GOOGLE_TOKEN_ENCRYPTION_KEY` as 32 cryptographically random bytes encoded as base64; never commit it.
-6. Run `supabase/migrations/0005_v05_google_workspace.sql` after migrations 0001–0004.
+6. Run `supabase/migrations/0005_v05_google_workspace.sql` and `0006_v06_production_operations.sql` after migrations 0001–0004.
 7. Set `GOOGLE_GMAIL_ENABLED=true` and/or `GOOGLE_CALENDAR_ENABLED=true`, restart JARVIS, then connect each capability from Settings.
 8. Public apps using Gmail restricted scopes may require Google OAuth verification and an independent security assessment. Keep the app in Testing for private development until that process is complete.
 
 ### Production Gmail push
 
-Create a Pub/Sub topic in the same Cloud project, grant `gmail-api-push@system.gserviceaccount.com` permission to publish, create a push subscription targeting `https://YOUR_HOST/api/webhooks/google/gmail?token=YOUR_RANDOM_TOKEN`, and set `GOOGLE_PUBSUB_TOPIC` plus `GOOGLE_PUBSUB_VERIFICATION_TOKEN`. Call the authenticated `/api/integrations/google/renew` service with `{ "capability": "gmail" }` daily; Gmail watches expire within seven days. Pub/Sub is only a signal—JARVIS calls Gmail history synchronization and persists the new checkpoint.
+Create a Pub/Sub topic in the same Cloud project, grant `gmail-api-push@system.gserviceaccount.com` permission to publish, and create an authenticated push subscription targeting `https://YOUR_HOST/api/webhooks/google/gmail`. Set the exact OIDC audience and push service-account identity in `GOOGLE_PUBSUB_EXPECTED_AUDIENCE` and `GOOGLE_PUBSUB_ALLOWED_SERVICE_ACCOUNT`. The durable scheduler renews Gmail watches ahead of expiration; Pub/Sub remains only a signal and never performs synchronization inside the webhook request.
 
 ### Production Calendar watch
 
-Set `GOOGLE_CALENDAR_WEBHOOK_BASE_URL` to the public HTTPS origin and generate a random `GOOGLE_CALENDAR_CHANNEL_TOKEN`. Renew through `/api/integrations/google/renew` with `{ "capability": "calendar" }`. The webhook validates channel/token/resource headers, then performs a fresh authorized Calendar read. Calendar notifications are not treated as event data.
+Set `GOOGLE_CALENDAR_WEBHOOK_BASE_URL` to the public HTTPS origin. JARVIS generates a different cryptographically random token for every channel and stores only its hash. The scheduler renews channels ahead of expiration, replaces old channels safely, and the webhook validates persisted channel/token/resource state before enqueuing an incremental sync.
 
 Localhost cannot receive Google push webhooks. The Settings **Development Sync** buttons perform bounded manual Gmail history or Calendar synchronization and are explicitly labelled as development behavior; no background scheduler is faked.
 
@@ -82,6 +185,7 @@ Example commands:
    - `supabase/migrations/0003_v03_live_research.sql`
    - `supabase/migrations/0004_v04_voice.sql`
    - `supabase/migrations/0005_v05_google_workspace.sql`
+   - `supabase/migrations/0006_v06_production_operations.sql`
 2. Enable Supabase Email authentication. Configure local Site URL `http://localhost:3000` and callback `http://localhost:3000/auth/callback`.
 3. Set the Supabase Project URL and publishable key in `.env.local`. Do not use a service-role key.
 4. Set a server-only `OPENAI_API_KEY`, choose an available Responses API model, and set `LIVE_RESEARCH_ENABLED=true`.
@@ -105,6 +209,13 @@ GOOGLE_REDIRECT_URI=http://127.0.0.1:3000/api/integrations/google/callback
 GOOGLE_TOKEN_ENCRYPTION_KEY=
 GOOGLE_GMAIL_ENABLED=true
 GOOGLE_CALENDAR_ENABLED=true
+GOOGLE_PUBSUB_TOPIC=
+GOOGLE_PUBSUB_EXPECTED_AUDIENCE=
+GOOGLE_PUBSUB_ALLOWED_SERVICE_ACCOUNT=
+GOOGLE_CALENDAR_WEBHOOK_BASE_URL=
+JOB_LOCK_TIMEOUT_SECONDS=300
+JOB_MAX_ATTEMPTS=4
+OPERATIONS_RETENTION_DAYS=30
 RESEARCH_MAX_LEADS=50
 ```
 
@@ -179,7 +290,7 @@ npm test
 npm run build
 ```
 
-The 49-test suite covers SSRF URLs and redirects, timeout/size/content limits, injection boundaries, evidence-only scoring, deterministic dedupe, persisted resume/cancel behavior, user-scoped evidence, Google OAuth state and token encryption, watch renewal, notification dedupe/isolation, untrusted email handling, frozen and edited approvals, threaded at-most-once email delivery, Calendar timezone validation, the shared text/voice tool loop, and repository persistence. Tests do not call Google, OpenAI, or paid services.
+The unit/security suite covers SSRF URLs and redirects, timeout/size/content limits, injection boundaries, evidence-only scoring, deterministic dedupe, durable job concurrency, stale lease recovery, bounded retries, dead letters, user isolation, signed Pub/Sub claim validation, Calendar channel validation, Google OAuth state and token encryption, notification dedupe, untrusted email handling, frozen approvals, at-most-once email delivery, Calendar timezone validation, the shared text/voice tool loop, and repository persistence. Playwright separately covers the critical credential-free browser flows. Default tests do not call Google, OpenAI, or paid services.
 
 ## Troubleshooting
 
@@ -187,16 +298,16 @@ The 49-test suite covers SSRF URLs and redirects, timeout/size/content limits, i
 - **Demo results appear:** Demo Mode deliberately uses fictional `.example` records. Configure Supabase to enter Live Mode.
 - **Research returns no candidates:** the provider failed or returned no cited candidates; JARVIS does not fabricate replacements.
 - **Website signals are Unknown:** the official site was not confidently identified or the secure fetcher rejected/timed out. Inspect the run steps and sources.
-- **Database errors after upgrade:** run migrations in order through `0005_v05_google_workspace.sql`; do not skip the v0.2–v0.4 migrations.
+- **Database errors after upgrade:** run migrations in order through `0006_v06_production_operations.sql`; do not skip any earlier migration.
 - **A partial run remains:** reopening/continuing it is safe; processed candidates are not duplicated.
 - **Google says redirect URI mismatch:** copy `GOOGLE_REDIRECT_URI` exactly into the OAuth Web Client authorized redirect URIs.
 - **Gmail send is not available:** reconnect Gmail and grant both displayed Gmail scopes; sending still requires a specific approval.
 - **Google needs reconnect:** the refresh token was revoked/expired; use Reconnect in Settings. JARVIS does not retry forever.
-- **Push does not work locally:** expected. Use Development Sync; Gmail Pub/Sub and Calendar watches require public trusted endpoints (Calendar requires HTTPS).
+- **Push does not work locally:** expected. Use explicit diagnostic sync; Gmail Pub/Sub and Calendar watches require public trusted HTTPS endpoints. Run the worker and scheduler separately.
 - **Voice says unavailable:** voice intentionally requires Live Mode, `OPENAI_API_KEY`, and `VOICE_ENABLED=true`.
 - **Microphone is blocked:** grant microphone permission to the localhost/HTTPS origin and start a new session.
 - **Voice disconnects:** JARVIS attempts one bounded reconnect; text mode stays available throughout.
 
 ## Known limitations
 
-Live Google behavior requires owner-provided OAuth credentials and a migrated Supabase project; it cannot be end-to-end tested with repository-only fixtures. Localhost supports manual Development Sync but cannot receive Google push delivery. Gmail and Calendar change notifications are signals and may be delayed or occasionally missed, so production should retain periodic bounded reconciliation. Live Research depends on public web availability and the configured model. Realtime voice depends on browser WebRTC/microphone support. JARVIS does not bypass access controls, solve CAPTCHAs, scrape authenticated pages, or guarantee exhaustive coverage. In-memory Demo Mode resets on server restart. Rate limiting and renewal scheduling are process-local hooks and should use shared production infrastructure.
+Live Google behavior requires owner-provided OAuth credentials and a migrated Supabase project; it cannot be end-to-end tested with repository-only fixtures. Localhost supports explicit diagnostics but cannot receive Google push delivery. Gmail and Calendar change notifications are signals and may be delayed or occasionally missed, so production retains periodic bounded reconciliation. Live Research depends on public web availability and the configured model. Realtime voice depends on browser WebRTC/microphone support. JARVIS does not bypass access controls, solve CAPTCHAs, scrape authenticated pages, or guarantee exhaustive coverage. In-memory Demo Mode resets on server restart. Production rate limits, jobs, leases, schedules, health, and renewal state are shared in PostgreSQL, but the worker and scheduler processes must still be deployed and supervised by the operator.

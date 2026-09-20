@@ -1,6 +1,6 @@
 {
   "name": "jarvis-business-os",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run tests",
+    "test:e2e": "playwright test",
+    "test:live-google": "vitest run tests-live",
+    "worker": "tsx scripts/worker.ts",
+    "worker:once": "tsx scripts/worker.ts --once",
+    "scheduler": "tsx scripts/scheduler.ts",
+    "scheduler:once": "tsx scripts/scheduler.ts --once"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -24,13 +30,18 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.2",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "postcss": "^8.5.24"
   }
 }

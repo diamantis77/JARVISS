@@ -1,4 +1,3 @@
-import "server-only";
 import type { RuntimeMode } from "../config/runtime";
 import type { Repositories } from "../repositories/contracts";
 import { isOpenAiConfigured } from "../config/runtime";
