@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const commandSchema = z.object({ command: z.string().trim().min(2).max(1000) });
+export const voiceCommandSchema = commandSchema.extend({ source: z.literal("voice"), voiceSessionId: z.string().min(1).max(200), voiceCommandId: z.string().min(1).max(200) });
 export const leadSearchSchema = z.object({ category: z.string().min(2), location: z.string().min(2), limit: z.number().int().min(1).max(100) });
 export const approvalSchema = z.object({ approvalId: z.string().min(1), decision: z.enum(["approved", "rejected"]) });
 export const approvalDecisionSchema = z.object({ decision: z.enum(["approved", "rejected"]) });
@@ -15,4 +16,6 @@ export const settingsSchema = z.object({
   researchFetchTimeoutMs: z.number().int().min(2000).max(20000),
   researchMaxConcurrency: z.number().int().min(1).max(5),
   researchAiAnalysisEnabled: z.boolean(),
+  jarvisVoice: z.enum(["marin", "cedar", "coral", "alloy"]),
+  voiceMode: z.enum(["conversation", "push_to_talk"]),
 });

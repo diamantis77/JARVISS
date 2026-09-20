@@ -1,5 +1,5 @@
 import type { Repositories } from "./contracts";
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ResearchCandidate, ResearchRun, ResearchSource, Task, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ResearchCandidate, ResearchRun, ResearchSource, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 import { demoActivities, demoApproval, demoLeads, demoRun, demoTasks } from "../demo-data";
 
 export function createDemoRepositories(): Repositories {
@@ -14,7 +14,9 @@ export function createDemoRepositories(): Repositories {
   const researchSources: ResearchSource[] = [];
   const leadEvidence: LeadEvidence[] = [];
   const websiteAnalyses: WebsiteAnalysis[] = [];
-  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false };
+  const voiceSessions: VoiceSession[] = [];
+  const voiceTranscripts: VoiceTranscript[] = [];
+  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation" };
   return {
     leads: {
       async list() { return [...leads].sort((a, b) => b.score - a.score); },
@@ -76,6 +78,13 @@ export function createDemoRepositories(): Repositories {
       async listSourcesForLead(leadId) { return researchSources.filter((item) => item.leadId === leadId); },
       async listEvidenceForLead(leadId) { return leadEvidence.filter((item) => item.leadId === leadId); },
       async listWebsiteAnalysesForLead(leadId) { return websiteAnalyses.filter((item) => item.leadId === leadId); },
+    },
+    voice: {
+      async createSession(input) { const item: VoiceSession = { id: `voice_${crypto.randomUUID()}`, providerSessionId: input.providerSessionId, status: "connecting", model: input.model, voice: input.voice, startedAt: new Date().toISOString(), endedAt: null }; voiceSessions.push(item); return item; },
+      async updateSession(id, patch) { const item = voiceSessions.find((session) => session.id === id); if (!item) throw new Error("Voice session not found"); Object.assign(item, patch); return item; },
+      async getSession(id) { return voiceSessions.find((session) => session.id === id) ?? null; },
+      async addTranscript(input) { const duplicate = voiceTranscripts.find((item) => item.voiceSessionId === input.voiceSessionId && item.commandId === input.commandId && item.role === input.role); if (duplicate) return duplicate; const item: VoiceTranscript = { ...input, id: `voice_transcript_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; voiceTranscripts.push(item); return item; },
+      async listTranscripts(sessionId) { return voiceTranscripts.filter((item) => item.voiceSessionId === sessionId); },
     },
   };
 }

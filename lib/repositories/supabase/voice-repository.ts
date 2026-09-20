@@ -1,0 +1,15 @@
+import type { VoiceRepository } from "../contracts";
+import type { VoiceSession, VoiceTranscript } from "@/types";
+import { assertResult, type DbClient } from "./shared";
+
+const mapSession = (row: Record<string, unknown>): VoiceSession => ({ id: String(row.id), providerSessionId: row.provider_session_id ? String(row.provider_session_id) : null, status: row.status as VoiceSession["status"], model: String(row.model), voice: String(row.voice), startedAt: String(row.started_at), endedAt: row.ended_at ? String(row.ended_at) : null });
+const mapTranscript = (row: Record<string, unknown>): VoiceTranscript => ({ id: String(row.id), voiceSessionId: String(row.voice_session_id), jarvisRunId: row.jarvis_run_id ? String(row.jarvis_run_id) : null, commandId: String(row.command_id), role: row.role as VoiceTranscript["role"], text: String(row.transcript_text), createdAt: String(row.created_at) });
+
+export class SupabaseVoiceRepository implements VoiceRepository {
+  constructor(private readonly db: DbClient, private readonly userId: string) {}
+  async createSession(input: Parameters<VoiceRepository["createSession"]>[0]) { const { data, error } = await this.db.from("voice_sessions").insert({ user_id: this.userId, provider_session_id: input.providerSessionId, status: "connecting", model: input.model, voice: input.voice }).select().single(); return mapSession(assertResult(data, error, "voice.create")); }
+  async updateSession(id: string, patch: Parameters<VoiceRepository["updateSession"]>[1]) { const row: Record<string, unknown> = {}; if (patch.providerSessionId !== undefined) row.provider_session_id = patch.providerSessionId; if (patch.status !== undefined) row.status = patch.status; if (patch.endedAt !== undefined) row.ended_at = patch.endedAt; const { data, error } = await this.db.from("voice_sessions").update(row).eq("user_id", this.userId).eq("id", id).select().single(); return mapSession(assertResult(data, error, "voice.update")); }
+  async getSession(id: string) { const { data, error } = await this.db.from("voice_sessions").select("*").eq("user_id", this.userId).eq("id", id).maybeSingle(); if (error) throw new Error("Unable to read voice session"); return data ? mapSession(data) : null; }
+  async addTranscript(input: Parameters<VoiceRepository["addTranscript"]>[0]) { const session = await this.getSession(input.voiceSessionId); if (!session) throw new Error("Voice session not found"); const { data, error } = await this.db.from("voice_transcripts").upsert({ user_id: this.userId, voice_session_id: input.voiceSessionId, jarvis_run_id: input.jarvisRunId, command_id: input.commandId, role: input.role, transcript_text: input.text }, { onConflict: "user_id,voice_session_id,command_id,role" }).select().single(); return mapTranscript(assertResult(data, error, "voice.transcript")); }
+  async listTranscripts(sessionId: string) { if (!await this.getSession(sessionId)) return []; const { data, error } = await this.db.from("voice_transcripts").select("*").eq("user_id", this.userId).eq("voice_session_id", sessionId).order("created_at"); return assertResult(data, error, "voice.list").map(mapTranscript); }
+}

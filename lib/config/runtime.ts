@@ -14,6 +14,10 @@ export function isOpenAiConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }
 
+export function isVoiceEnabled(mode: RuntimeMode): boolean {
+  return mode === "live" && process.env.VOICE_ENABLED === "true" && isOpenAiConfigured();
+}
+
 export function getResearchMode(mode: RuntimeMode): "demo" | "live" | "disabled" {
   if (mode === "demo") return "demo";
   return process.env.LIVE_RESEARCH_ENABLED === "true" && isOpenAiConfigured() ? "live" : "disabled";

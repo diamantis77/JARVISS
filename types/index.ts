@@ -3,6 +3,7 @@ export type RunStatus = "pending" | "running" | "completed" | "failed" | "waitin
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ToolPermission = "SAFE_AUTOMATIC" | "REQUIRES_USER_APPROVAL";
 export type JarvisState = "idle" | "listening" | "thinking" | "executing" | "success" | "error";
+export type VoiceState = "idle" | "requesting_microphone" | "connecting" | "listening" | "user_speaking" | "processing" | "jarvis_speaking" | "interrupted" | "reconnecting" | "error" | "disconnected";
 export type EvidenceConfidence = "verified" | "high" | "medium" | "low" | "unknown";
 export type ResearchStatus = "pending" | "running" | "partial" | "completed" | "cancelled" | "failed";
 export type ResearchCandidateStatus = "discovered" | "verified" | "analyzed" | "qualified" | "failed" | "skipped";
@@ -122,6 +123,28 @@ export interface BusinessSettings {
   researchFetchTimeoutMs: number;
   researchMaxConcurrency: number;
   researchAiAnalysisEnabled: boolean;
+  jarvisVoice: "marin" | "cedar" | "coral" | "alloy";
+  voiceMode: "conversation" | "push_to_talk";
+}
+
+export interface VoiceSession {
+  id: string;
+  providerSessionId: string | null;
+  status: "connecting" | "active" | "ended" | "failed";
+  model: string;
+  voice: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface VoiceTranscript {
+  id: string;
+  voiceSessionId: string;
+  jarvisRunId: string | null;
+  commandId: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt: string;
 }
 
 export interface ResearchSource {

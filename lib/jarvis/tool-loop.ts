@@ -9,14 +9,19 @@ import type { Approval, JarvisRun } from "../../types";
 import type { ResearchService } from "../research/contracts";
 
 export type JarvisEvent = { type: "run" | "step" | "approval" | "complete" | "error"; run: JarvisRun; approval?: Approval; message?: string };
-interface RunOptions { command: string; mode: RuntimeMode; repositories: Repositories; provider: JarvisAiProvider; researchService?: ResearchService; onEvent?: (event: JarvisEvent) => void | Promise<void> }
+interface RunOptions { command: string; mode: RuntimeMode; repositories: Repositories; provider: JarvisAiProvider; researchService?: ResearchService; inputSource?: "text" | "voice"; voiceSessionId?: string; voiceCommandId?: string; onEvent?: (event: JarvisEvent) => void | Promise<void> }
 
 function safeParseArguments(raw: string): unknown { try { return JSON.parse(raw); } catch { return null; } }
 function approvalAction(toolName: string): Approval["actionType"] { if (toolName === "send_email") return "send_email"; return "update_crm"; }
 function approvalPresentation(toolName: string, args: Record<string, unknown>) { return { recipient: typeof args.recipient === "string" ? args.recipient : "CRM record", subject: typeof args.subject === "string" ? args.subject : toolName.replaceAll("_", " "), preview: typeof args.preview === "string" ? args.preview : JSON.stringify(args) }; }
 
-export async function runJarvisLoop({ command, mode, repositories, provider, researchService, onEvent }: RunOptions) {
+export async function runJarvisLoop({ command, mode, repositories, provider, researchService, inputSource = "text", voiceSessionId, voiceCommandId, onEvent }: RunOptions) {
   let run = await repositories.runs.createRun(command);
+  if (inputSource === "voice" && voiceSessionId && voiceCommandId) {
+    run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), inputSource: "voice", voiceSessionId, voiceCommandId } });
+    await repositories.voice.addTranscript({ voiceSessionId, jarvisRunId: run.id, commandId: voiceCommandId, role: "user", text: command });
+  }
+  const persistVoiceResponse = async (text: string) => { if (inputSource === "voice" && voiceSessionId && voiceCommandId) await repositories.voice.addTranscript({ voiceSessionId, jarvisRunId: run.id, commandId: voiceCommandId, role: "assistant", text }); };
   log("run_started", { runId: run.id, mode });
   await onEvent?.({ type: "run", run });
   const understanding = await repositories.runs.addStep(run.id, { order: 1, title: "Understanding request", description: "Validated the command and prepared a constrained execution context.", status: "completed", toolName: "plan_request", output: { accepted: true } });
@@ -60,6 +65,7 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
           run = (await repositories.runs.getRun(run.id)) ?? run;
           log("approval_requested", { runId: run.id, approvalId: approval.id, toolName: call.name });
           await onEvent?.({ type: "approval", run, approval, message: run.summary });
+          await persistVoiceResponse(run.summary);
           return { run, approval, message: run.summary };
         }
         log("tool_called", { runId: run.id, toolName: call.name });
@@ -88,11 +94,13 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
     run = await repositories.runs.updateRun(run.id, { status: researchPending ? "running" : "completed", summary: researchPending ? `${message} Research progress is persisted and will continue in the next batch.` : message, providerResponseId: turn.responseId });
     run = (await repositories.runs.getRun(run.id)) ?? run;
     await onEvent?.({ type: "complete", run, message: run.summary });
+    await persistVoiceResponse(run.summary);
     return { run, message: run.summary };
   } catch {
     run = await repositories.runs.updateRun(run.id, { status: "failed", summary: "JARVIS could not complete this run. Please try again." });
     run = (await repositories.runs.getRun(run.id)) ?? run;
     await onEvent?.({ type: "error", run, message: run.summary });
+    await persistVoiceResponse(run.summary);
     return { run, message: run.summary };
   }
 }

@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
+@import "./voice.css";
 
 :root { --bg: #060b12; --surface: rgba(14, 25, 38, .72); --border: rgba(145, 194, 222, .13); --muted: #8391a2; --text: #eaf5ff; --cyan: #5bd8ff; --success: #77e0b1; --amber: #f8c66c; }
 * { box-sizing: border-box; }

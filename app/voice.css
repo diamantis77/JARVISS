@@ -1,0 +1,21 @@
+.core-center {
+  width: calc(105px + var(--audio-level, 0) * 12px);
+  height: calc(105px + var(--audio-level, 0) * 12px);
+  box-shadow: 0 0 calc(28px + var(--audio-level, 0) * 42px) rgba(77, 212, 255, .6), inset 0 0 18px rgba(219, 253, 255, .55);
+  transition: width .08s linear, height .08s linear, box-shadow .08s linear;
+}
+.core.processing .ring-one, .core.reconnecting .ring-one { animation-duration: 8s; }
+.core.processing .ring-two, .core.reconnecting .ring-two { animation-duration: 5s; }
+.core.user_speaking .core-center, .core.jarvis_speaking .core-center { animation: breathe 1s ease-in-out infinite; }
+.core.interrupted .ring { border-color: rgba(248, 198, 108, .58); }
+.core.error .core-center { box-shadow: 0 0 38px rgba(255, 98, 116, .55); }
+.voice-button.active { color: var(--cyan); border-color: rgba(91, 216, 255, .55); box-shadow: 0 0 20px rgba(91, 216, 255, .2); }
+.voice-transcript { padding: 14px 16px; margin-top: 14px; display: grid; gap: 10px; }
+.voice-head { display: flex; align-items: center; justify-content: space-between; color: var(--cyan); font: 10px "DM Mono", monospace; text-transform: uppercase; }
+.voice-head button { display: flex; align-items: center; gap: 6px; background: transparent; color: #b7cbd7; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; font-size: 10px; }
+.voice-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); margin-right: 7px; }
+.voice-turn { display: grid; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
+.voice-turn p, .voice-partial { display: grid; grid-template-columns: 74px 1fr; gap: 9px; margin: 0; color: #bfd0db; font-size: 11px; line-height: 1.5; }
+.voice-turn b, .voice-partial b { color: #7692a4; font: 9px "DM Mono", monospace; padding-top: 3px; }
+.voice-partial { opacity: .72; border-top: 1px solid var(--border); padding-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .core-center { transition: none !important; } }

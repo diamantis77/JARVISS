@@ -1,4 +1,4 @@
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ResearchCandidate, ResearchRun, ResearchSource, ResearchStatus, RunStatus, Task, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ResearchCandidate, ResearchRun, ResearchSource, RunStatus, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 
 export interface LeadRepository {
   list(): Promise<Lead[]>;
@@ -70,6 +70,14 @@ export interface EvidenceRepository {
   listWebsiteAnalysesForLead(leadId: string): Promise<WebsiteAnalysis[]>;
 }
 
+export interface VoiceRepository {
+  createSession(input: { providerSessionId: string | null; model: string; voice: string }): Promise<VoiceSession>;
+  updateSession(id: string, patch: Partial<Pick<VoiceSession, "providerSessionId" | "status" | "endedAt">>): Promise<VoiceSession>;
+  getSession(id: string): Promise<VoiceSession | null>;
+  addTranscript(input: Omit<VoiceTranscript, "id" | "createdAt">): Promise<VoiceTranscript>;
+  listTranscripts(sessionId: string): Promise<VoiceTranscript[]>;
+}
+
 export interface Repositories {
   leads: LeadRepository;
   interactions: InteractionRepository;
@@ -80,6 +88,7 @@ export interface Repositories {
   settings: SettingsRepository;
   research: ResearchRepository;
   evidence: EvidenceRepository;
+  voice: VoiceRepository;
 }
 
 export type LeadUpdate = { status?: LeadStatus };
