@@ -3,6 +3,7 @@ import { createRequestRepositories } from "@/lib/repositories/factory";
 import { executeTool } from "@/lib/tools/execute";
 import { isToolName, toolRegistry } from "@/lib/tools/registry";
 import { log } from "@/lib/logger";
+import { createWorkspaceProviders } from "@/lib/workspace/factory";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await createRequestRepositories();
@@ -28,7 +29,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   try { await context.repositories.approvals.claimForExecution(approval.id); }
   catch { return Response.json({ error: "This approval was already resolved. No duplicate action was executed." }, { status: 409 }); }
-  const result = await executeTool(toolName, input, { approved: true, context: { repositories: context.repositories, mode: context.mode } });
+  const result = await executeTool(toolName, input, { approved: true, context: { repositories: context.repositories, mode: context.mode, workspace: createWorkspaceProviders(context.repositories, context.mode) } });
   const resolved = await context.repositories.approvals.recordExecution(approval.id, result.ok ? result.value : undefined, result.ok ? undefined : result.reason);
   const message = result.ok ? (toolName === "send_email" && "sent" in result.value && !result.value.sent ? "Approved, but no email was sent because the email provider is not connected." : "Approved action executed and recorded.") : "The approved action failed safely. No unverified success was recorded.";
   const stepId = typeof approval.payload?.stepId === "string" ? approval.payload.stepId : null;

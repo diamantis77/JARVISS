@@ -1,5 +1,5 @@
 import type { Repositories } from "./contracts";
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ResearchCandidate, ResearchRun, ResearchSource, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, ProviderConnection, ProviderSyncState, ResearchCandidate, ResearchRun, ResearchSource, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 import { demoActivities, demoApproval, demoLeads, demoRun, demoTasks } from "../demo-data";
 
 export function createDemoRepositories(): Repositories {
@@ -16,7 +16,10 @@ export function createDemoRepositories(): Repositories {
   const websiteAnalyses: WebsiteAnalysis[] = [];
   const voiceSessions: VoiceSession[] = [];
   const voiceTranscripts: VoiceTranscript[] = [];
-  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation" };
+  let googleConnection: ProviderConnection | null = null;
+  const syncStates: ProviderSyncState[] = [];
+  const notifications: JarvisNotification[] = [{ id: "notification-demo-reply", type: "EMAIL_REPLY", priority: "important", title: "Demo reply from Papadopoulos Dental", body: "Fictional customer asked about availability tomorrow.", entityType: "email_thread", entityId: "demo-thread-1", readAt: null, dismissedAt: null, metadata: { demo: true }, createdAt: new Date().toISOString() }];
+  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation", timezone: "Europe/Athens" };
   return {
     leads: {
       async list() { return [...leads].sort((a, b) => b.score - a.score); },
@@ -28,7 +31,9 @@ export function createDemoRepositories(): Repositories {
     },
     interactions: {
       async listForLead(leadId) { return interactions.filter((item) => item.leadId === leadId); },
+      async getById(id) { return interactions.find((item) => item.id === id) ?? null; },
       async create(input) { const item = { ...input, id: `interaction_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; interactions.push(item); return item; },
+      async updateStatus(id, status) { const item = interactions.find((entry) => entry.id === id); if (!item) throw new Error("Interaction not found"); item.status = status; return item; },
     },
     tasks: {
       async list(status) { return status ? tasks.filter((task) => task.status === status) : [...tasks]; },
@@ -47,7 +52,7 @@ export function createDemoRepositories(): Repositories {
       async create(input) { const approval: Approval = { id: `approval_${crypto.randomUUID()}`, runId: input.runId, actionType: input.actionType, status: "pending", recipient: input.recipient ?? "Unknown", subject: input.subject ?? input.actionType, preview: input.preview ?? "Review demo action", payload: input.payload, createdAt: new Date().toISOString(), resolvedAt: null }; approvals.unshift(approval); return approval; },
       async getById(id) { return approvals.find((item) => item.id === id) ?? null; },
       async getPending() { return approvals.filter((item) => item.status === "pending"); },
-      async edit(id, patch) { const approval = approvals.find((item) => item.id === id); if (!approval || approval.status !== "pending") throw new Error("Approval not pending"); approval.subject = patch.subject; approval.preview = patch.preview; approval.payload = { ...(approval.payload ?? {}), subject: patch.subject, preview: patch.preview, input: { ...((approval.payload?.input as Record<string, unknown> | undefined) ?? {}), subject: patch.subject, preview: patch.preview } }; return approval; },
+      async edit(id, patch) { const approval = approvals.find((item) => item.id === id); if (!approval || approval.status !== "pending") throw new Error("Approval not pending"); approval.subject = patch.subject; approval.preview = patch.preview; const original = (approval.payload?.input as Record<string, unknown> | undefined) ?? {}; const input = { ...original, subject: patch.subject, ...(approval.payload?.toolName === "send_email" ? { body: patch.preview } : { preview: patch.preview }) }; approval.payload = { ...(approval.payload ?? {}), subject: patch.subject, preview: patch.preview, input, approvalRevision: Number(approval.payload?.approvalRevision ?? 1) + 1 }; return approval; },
       async claimForExecution(id) { const approval = approvals.find((item) => item.id === id); if (!approval || approval.status !== "pending") throw new Error("Approval not pending"); approval.status = "approved"; approval.resolvedAt = new Date().toISOString(); return approval; },
       async recordExecution(id) { const approval = approvals.find((item) => item.id === id); if (!approval || approval.status !== "approved") throw new Error("Approval not approved"); return approval; },
       async resolve(id, status) { const approval = approvals.find((item) => item.id === id); if (!approval || approval.status !== "pending") throw new Error("Approval not pending"); approval.status = status; approval.resolvedAt = new Date().toISOString(); return approval; },
@@ -85,6 +90,20 @@ export function createDemoRepositories(): Repositories {
       async getSession(id) { return voiceSessions.find((session) => session.id === id) ?? null; },
       async addTranscript(input) { const duplicate = voiceTranscripts.find((item) => item.voiceSessionId === input.voiceSessionId && item.commandId === input.commandId && item.role === input.role); if (duplicate) return duplicate; const item: VoiceTranscript = { ...input, id: `voice_transcript_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; voiceTranscripts.push(item); return item; },
       async listTranscripts(sessionId) { return voiceTranscripts.filter((item) => item.voiceSessionId === sessionId); },
+    },
+    connections: {
+      async getGoogle() { return googleConnection; },
+      async upsertGoogle(input) { googleConnection = { ...input, id: googleConnection?.id ?? `connection_${crypto.randomUUID()}`, connectedAt: googleConnection?.connectedAt ?? new Date().toISOString() }; return googleConnection; },
+      async update(id, patch) { if (!googleConnection || googleConnection.id !== id) throw new Error("Connection not found"); googleConnection = { ...googleConnection, ...patch }; return googleConnection; },
+      async disconnect(id) { if (!googleConnection || googleConnection.id !== id) throw new Error("Connection not found"); googleConnection = { ...googleConnection, status: "disconnected", accessTokenEncrypted: null, refreshTokenEncrypted: null, tokenExpiresAt: null }; return googleConnection; },
+      async getSyncState(connectionId, capability) { return syncStates.find((state) => state.connectionId === connectionId && state.capability === capability) ?? null; },
+      async upsertSyncState(state) { const index = syncStates.findIndex((item) => item.connectionId === state.connectionId && item.capability === state.capability); if (index >= 0) syncStates[index] = state; else syncStates.push(state); return state; },
+    },
+    notifications: {
+      async list(limit = 20, unreadOnly = false) { return notifications.filter((item) => !item.dismissedAt && (!unreadOnly || !item.readAt)).slice(0, limit); },
+      async create(input) { const dedupe = input.metadata.dedupeKey; const existing = typeof dedupe === "string" ? notifications.find((item) => item.metadata.dedupeKey === dedupe) : null; if (existing) return existing; const item: JarvisNotification = { ...input, id: `notification_${crypto.randomUUID()}`, readAt: null, dismissedAt: null, createdAt: new Date().toISOString() }; notifications.unshift(item); return item; },
+      async markRead(id) { const item = notifications.find((entry) => entry.id === id); if (!item) throw new Error("Notification not found"); item.readAt = new Date().toISOString(); return item; },
+      async dismiss(id) { const item = notifications.find((entry) => entry.id === id); if (!item) throw new Error("Notification not found"); item.dismissedAt = new Date().toISOString(); return item; },
     },
   };
 }

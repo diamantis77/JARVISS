@@ -1,4 +1,4 @@
-import type { Activity, Approval, BusinessSettings, Interaction, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ResearchCandidate, ResearchRun, ResearchSource, RunStatus, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
+import type { Activity, Approval, BusinessSettings, Interaction, JarvisNotification, JarvisRun, JarvisRunStep, Lead, LeadEvidence, LeadStatus, ProviderCapability, ProviderConnection, ProviderSyncState, ResearchCandidate, ResearchRun, ResearchSource, RunStatus, Task, VoiceSession, VoiceTranscript, WebsiteAnalysis } from "../../types";
 
 export interface LeadRepository {
   list(): Promise<Lead[]>;
@@ -11,7 +11,9 @@ export interface LeadRepository {
 
 export interface InteractionRepository {
   listForLead(leadId: string): Promise<Interaction[]>;
+  getById(id: string): Promise<Interaction | null>;
   create(input: Omit<Interaction, "id" | "createdAt">): Promise<Interaction>;
+  updateStatus(id: string, status: string): Promise<Interaction>;
 }
 
 export interface TaskRepository {
@@ -78,6 +80,22 @@ export interface VoiceRepository {
   listTranscripts(sessionId: string): Promise<VoiceTranscript[]>;
 }
 
+export interface ConnectionRepository {
+  getGoogle(): Promise<ProviderConnection | null>;
+  upsertGoogle(input: Omit<ProviderConnection, "id" | "connectedAt">): Promise<ProviderConnection>;
+  update(id: string, patch: Partial<Omit<ProviderConnection, "id" | "provider" | "providerAccountId" | "connectedAt">>): Promise<ProviderConnection>;
+  disconnect(id: string): Promise<ProviderConnection>;
+  getSyncState(connectionId: string, capability: ProviderCapability): Promise<ProviderSyncState | null>;
+  upsertSyncState(state: ProviderSyncState): Promise<ProviderSyncState>;
+}
+
+export interface NotificationRepository {
+  list(limit?: number, unreadOnly?: boolean): Promise<JarvisNotification[]>;
+  create(input: Omit<JarvisNotification, "id" | "readAt" | "dismissedAt" | "createdAt">): Promise<JarvisNotification>;
+  markRead(id: string): Promise<JarvisNotification>;
+  dismiss(id: string): Promise<JarvisNotification>;
+}
+
 export interface Repositories {
   leads: LeadRepository;
   interactions: InteractionRepository;
@@ -89,6 +107,8 @@ export interface Repositories {
   research: ResearchRepository;
   evidence: EvidenceRepository;
   voice: VoiceRepository;
+  connections: ConnectionRepository;
+  notifications: NotificationRepository;
 }
 
 export type LeadUpdate = { status?: LeadStatus };

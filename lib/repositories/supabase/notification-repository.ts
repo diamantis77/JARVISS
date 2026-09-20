@@ -1,0 +1,12 @@
+import type { NotificationRepository } from "@/lib/repositories/contracts";
+import type { JarvisNotification } from "@/types";
+import { assertResult, type DbClient } from "./shared";
+
+const map = (row: Record<string, unknown>): JarvisNotification => ({ id: String(row.id), type: row.type as JarvisNotification["type"], priority: row.priority as JarvisNotification["priority"], title: String(row.title), body: String(row.body), entityType: row.entity_type ? String(row.entity_type) : null, entityId: row.entity_id ? String(row.entity_id) : null, readAt: row.read_at ? String(row.read_at) : null, dismissedAt: row.dismissed_at ? String(row.dismissed_at) : null, metadata: row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {}, createdAt: String(row.created_at) });
+export class SupabaseNotificationRepository implements NotificationRepository {
+  constructor(private readonly db: DbClient, private readonly userId: string) {}
+  async list(limit = 20, unreadOnly = false) { let query = this.db.from("notifications").select("*").eq("user_id", this.userId).is("dismissed_at", null).order("created_at", { ascending: false }).limit(Math.min(limit, 50)); if (unreadOnly) query = query.is("read_at", null); const { data, error } = await query; return assertResult(data, error, "notifications.list").map(map); }
+  async create(input: Omit<JarvisNotification, "id" | "readAt" | "dismissedAt" | "createdAt">) { const dedupe = typeof input.metadata.dedupeKey === "string" ? input.metadata.dedupeKey : null; const { data, error } = await this.db.from("notifications").upsert({ user_id: this.userId, type: input.type, priority: input.priority, title: input.title, body: input.body, entity_type: input.entityType, entity_id: input.entityId, metadata: input.metadata, dedupe_key: dedupe }, { onConflict: "user_id,dedupe_key" }).select().single(); return map(assertResult(data, error, "notifications.create")); }
+  async markRead(id: string) { const { data, error } = await this.db.from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", this.userId).eq("id", id).select().single(); return map(assertResult(data, error, "notifications.read")); }
+  async dismiss(id: string) { const { data, error } = await this.db.from("notifications").update({ dismissed_at: new Date().toISOString() }).eq("user_id", this.userId).eq("id", id).select().single(); return map(assertResult(data, error, "notifications.dismiss")); }
+}

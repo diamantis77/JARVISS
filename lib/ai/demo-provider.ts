@@ -12,7 +12,16 @@ export class DemoJarvisProvider implements JarvisAiProvider {
       return { responseId, toolCalls: [], text: greek ? "Ολοκλήρωσα την ασφαλή ενέργεια χρησιμοποιώντας μόνο τα διαθέσιμα demo δεδομένα. Τα αποτελέσματα εμφανίζονται στο run και δεν έγινε καμία πραγματική εξωτερική ενέργεια." : "I completed the safe operation using only the available demo data. The result is recorded in this run; no real external action occurred." };
     }
     const lower = this.command.toLowerCase();
-    if (/send it|στείλ|αποστολ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "send_email", arguments: JSON.stringify({ draftId: "demo-draft", recipient: "demo@example.invalid", subject: "Demo outreach", preview: "Demo message preview — no email provider is connected." }) }] };
+    if (/send it|στείλ|αποστολ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "send_email", arguments: JSON.stringify({ draftId: "demo-draft", recipient: "demo@example.invalid", subject: "Demo outreach", body: "Demo message preview — no email provider is connected.", threadId: null, inReplyTo: null }) }] };
+    if (/email|mail|ηλεκτρον|μήνυμ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "list_email_threads", arguments: JSON.stringify({ maxResults: 5 }) }] };
+    if (/calendar|schedule|tomorrow|ημερολόγ|πρόγραμμ|αύριο/.test(lower)) {
+      const start = new Date();
+      start.setUTCDate(start.getUTCDate() + (/tomorrow|αύριο/.test(lower) ? 1 : 0));
+      start.setUTCHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 1);
+      return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "list_calendar_events", arguments: JSON.stringify({ timeMin: start.toISOString(), timeMax: end.toISOString(), timezone: "Europe/Athens", maxResults: 10 }) }] };
+    }
     if (/task|εργασ|υπενθύμ/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "create_task", arguments: JSON.stringify({ title: this.command.slice(0, 280), priority: "medium" }) }] };
     if (/strongest|my leads|my crm|ισχυρότερ|καλύτερ.*lead|crm/.test(lower)) return { responseId, text: "", toolCalls: [{ callId: `call_${crypto.randomUUID()}`, name: "search_crm", arguments: JSON.stringify({ query: "", limit: 5 }) }] };
     const englishResearch = this.command.match(/(?:find|research|discover)(?:\s+me)?\s+(?:(\d+)\s+)?(.+?)\s+in\s+(.+)/i);

@@ -1,6 +1,8 @@
 export type LeadStatus = "new" | "analyzed" | "qualified" | "contacted" | "interested" | "meeting" | "won" | "lost";
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "waiting_for_approval" | "cancelled";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type ProviderCapability = "gmail" | "calendar";
+export type NotificationPriority = "info" | "important" | "urgent";
 export type ToolPermission = "SAFE_AUTOMATIC" | "REQUIRES_USER_APPROVAL";
 export type JarvisState = "idle" | "listening" | "thinking" | "executing" | "success" | "error";
 export type VoiceState = "idle" | "requesting_microphone" | "connecting" | "listening" | "user_speaking" | "processing" | "jarvis_speaking" | "interrupted" | "reconnecting" | "error" | "disconnected";
@@ -70,7 +72,7 @@ export interface JarvisRun {
 export interface Approval {
   id: string;
   runId: string;
-  actionType: "send_email" | "update_crm" | "book_meeting";
+  actionType: "send_email" | "update_crm" | "book_meeting" | "create_calendar_event" | "update_calendar_event" | "delete_calendar_event";
   status: ApprovalStatus;
   recipient: string;
   subject: string;
@@ -106,6 +108,11 @@ export interface Interaction {
   content: string;
   status: string;
   createdAt: string;
+  provider?: string | null;
+  providerThreadId?: string | null;
+  providerMessageId?: string | null;
+  recipientEmail?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export interface BusinessSettings {
@@ -125,6 +132,7 @@ export interface BusinessSettings {
   researchAiAnalysisEnabled: boolean;
   jarvisVoice: "marin" | "cedar" | "coral" | "alloy";
   voiceMode: "conversation" | "push_to_talk";
+  timezone: string;
 }
 
 export interface VoiceSession {
@@ -145,6 +153,74 @@ export interface VoiceTranscript {
   role: "user" | "assistant";
   text: string;
   createdAt: string;
+}
+
+export interface ProviderConnection {
+  id: string;
+  provider: "google";
+  providerAccountId: string;
+  providerEmail: string;
+  status: "connected" | "needs_reconnect" | "disconnected" | "error";
+  scopes: string[];
+  accessTokenEncrypted: string | null;
+  refreshTokenEncrypted: string | null;
+  tokenExpiresAt: string | null;
+  connectedAt: string;
+  lastSyncAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+
+export interface EmailThreadSummary {
+  id: string;
+  latestMessageId: string;
+  from: string;
+  to: string[];
+  subject: string;
+  snippet: string;
+  receivedAt: string;
+  labels: string[];
+  leadId?: string | null;
+}
+
+export interface EmailThreadDetail extends EmailThreadSummary {
+  messages: Array<{ id: string; from: string; to: string[]; subject: string; body: string; receivedAt: string; messageIdHeader: string | null }>;
+}
+
+export interface CalendarEventRecord {
+  id: string;
+  calendarId: string;
+  title: string;
+  start: string;
+  end: string;
+  timezone: string;
+  attendees: string[];
+  location: string | null;
+  description: string | null;
+  status: string;
+}
+
+export interface JarvisNotification {
+  id: string;
+  type: "EMAIL_REPLY" | "HOT_LEAD_REPLY" | "APPROVAL_REQUIRED" | "MEETING_REQUEST" | "UPCOMING_MEETING" | "RESEARCH_COMPLETED" | "PROVIDER_ERROR" | "VOICE_ERROR";
+  priority: NotificationPriority;
+  title: string;
+  body: string;
+  entityType: string | null;
+  entityId: string | null;
+  readAt: string | null;
+  dismissedAt: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ProviderSyncState {
+  connectionId: string;
+  capability: ProviderCapability;
+  checkpoint: string | null;
+  watchExpiration: string | null;
+  lastSuccessfulSyncAt: string | null;
+  lastNotificationId: string | null;
 }
 
 export interface ResearchSource {

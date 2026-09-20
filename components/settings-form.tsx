@@ -31,6 +31,7 @@ export function SettingsForm({ initial, mode, onboarding = false }: { initial: B
       <label>Target industries<input value={form.targetIndustries.join(", ")} onChange={(event) => update("targetIndustries", list(event.target.value))} /></label>
       <label>Target locations<input value={form.targetLocations.join(", ")} onChange={(event) => update("targetLocations", list(event.target.value))} /></label>
       <label>Preferred language<select value={form.defaultLanguage} onChange={(event) => update("defaultLanguage", event.target.value)}><option value="en">English</option><option value="el">Greek</option></select></label>
+      <label>Timezone<input value={form.timezone} onChange={(event) => update("timezone", event.target.value)} placeholder="Europe/Athens" required /></label>
       <label>Minimum lead score<input type="number" min="0" max="100" value={form.minimumLeadScore} onChange={(event) => update("minimumLeadScore", Number(event.target.value))} /></label>
       <label className="wide">Company description<textarea rows={4} value={form.companyDescription} onChange={(event) => update("companyDescription", event.target.value)} /></label>
     </div>

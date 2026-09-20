@@ -9,7 +9,7 @@ const emptyRun: JarvisRun = { id: "idle", request: "", status: "pending", summar
 export const dynamic = "force-dynamic";
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ command?: string }> }) {
   const context = await createRequestRepositories(); if (!context) redirect("/auth/sign-in");
-  const [leads, activities, tasks, approvals, runs] = await Promise.all([context.repositories.leads.list(), context.repositories.activity.list(8), context.repositories.tasks.list(), context.repositories.approvals.getPending(), context.repositories.runs.listRecentRuns(1)]);
+  const [leads, activities, tasks, approvals, runs, notifications] = await Promise.all([context.repositories.leads.list(), context.repositories.activity.list(8), context.repositories.tasks.list(), context.repositories.approvals.getPending(), context.repositories.runs.listRecentRuns(1), context.repositories.notifications.list(12)]);
   const initialRun = runs[0] ? (await context.repositories.runs.getRun(runs[0].id)) ?? runs[0] : emptyRun;
-  return <CommandCenter mode={context.mode} aiMode={context.mode === "live" && isOpenAiConfigured() ? "openai" : "demo"} researchMode={getResearchMode(context.mode)} voiceEnabled={isVoiceEnabled(context.mode)} leads={leads} activities={activities} tasks={tasks} approvals={approvals} initialRun={initialRun} initialCommand={(await searchParams).command?.slice(0, 1000)} />;
+  return <CommandCenter mode={context.mode} aiMode={context.mode === "live" && isOpenAiConfigured() ? "openai" : "demo"} researchMode={getResearchMode(context.mode)} voiceEnabled={isVoiceEnabled(context.mode)} leads={leads} activities={activities} tasks={tasks} approvals={approvals} notifications={notifications} initialRun={initialRun} initialCommand={(await searchParams).command?.slice(0, 1000)} />;
 }

@@ -1,0 +1,8 @@
+import { createRequestRepositories } from "@/lib/repositories/factory";
+import { googleOAuthClient } from "@/lib/google/oauth";
+import { decryptToken } from "@/lib/google/token-crypto";
+import { hasCapability } from "@/lib/google/scopes";
+
+const publicConnection = (connection: Awaited<ReturnType<NonNullable<Awaited<ReturnType<typeof createRequestRepositories>>>["repositories"]["connections"]["getGoogle"]>>) => connection && ({ id: connection.id, providerEmail: connection.providerEmail, status: connection.status, scopes: connection.scopes, connectedAt: connection.connectedAt, lastSyncAt: connection.lastSyncAt, errorCode: connection.errorCode, errorMessage: connection.errorMessage, gmail: hasCapability(connection.scopes, "gmail"), calendar: hasCapability(connection.scopes, "calendar") });
+export async function GET() { const context = await createRequestRepositories(); if (!context) return Response.json({ error: "Session expired" }, { status: 401 }); return Response.json({ connection: publicConnection(await context.repositories.connections.getGoogle()), mode: context.mode }); }
+export async function DELETE() { const context = await createRequestRepositories(); if (!context || context.mode !== "live") return Response.json({ error: "Session expired" }, { status: 401 }); const connection = await context.repositories.connections.getGoogle(); if (!connection) return Response.json({ disconnected: true }); try { const token = connection.refreshTokenEncrypted || connection.accessTokenEncrypted; if (token) await googleOAuthClient().revokeToken(decryptToken(token)); } catch { /* local deletion still prevents future access */ } await context.repositories.connections.disconnect(connection.id); return Response.json({ disconnected: true }); }

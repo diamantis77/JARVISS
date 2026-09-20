@@ -18,4 +18,5 @@ export const settingsSchema = z.object({
   researchAiAnalysisEnabled: z.boolean(),
   jarvisVoice: z.enum(["marin", "cedar", "coral", "alloy"]),
   voiceMode: z.enum(["conversation", "push_to_talk"]),
+  timezone: z.string().trim().min(1).max(100),
 });

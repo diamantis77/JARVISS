@@ -35,7 +35,8 @@ export function mapRun(row: Record<string, unknown>, steps: JarvisRunStep[] = []
 export function mapApproval(row: Record<string, unknown>): Approval {
   const payload = (row.payload && typeof row.payload === "object" ? row.payload : {}) as Record<string, unknown>;
   const rawAction = String(row.action_type);
-  const actionType: Approval["actionType"] = rawAction === "send_email" || rawAction === "book_meeting" ? rawAction : "update_crm";
+  const knownActions: Approval["actionType"][] = ["send_email", "book_meeting", "update_crm", "create_calendar_event", "update_calendar_event", "delete_calendar_event"];
+  const actionType: Approval["actionType"] = knownActions.includes(rawAction as Approval["actionType"]) ? rawAction as Approval["actionType"] : "update_crm";
   return { id: String(row.id), runId: String(row.run_id), actionType, status: row.status as Approval["status"], recipient: String(payload.recipient ?? "Unknown"), subject: String(payload.subject ?? rawAction), preview: String(payload.preview ?? "Review the structured payload before approval."), payload, createdAt: String(row.created_at), resolvedAt: row.resolved_at ? String(row.resolved_at) : null };
 }
 

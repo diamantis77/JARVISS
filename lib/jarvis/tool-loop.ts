@@ -7,15 +7,17 @@ import { isToolName, openAiTools, toolRegistry } from "../tools/registry";
 import { log } from "../logger";
 import type { Approval, JarvisRun } from "../../types";
 import type { ResearchService } from "../research/contracts";
+import { createWorkspaceProviders } from "../workspace/factory";
 
 export type JarvisEvent = { type: "run" | "step" | "approval" | "complete" | "error"; run: JarvisRun; approval?: Approval; message?: string };
 interface RunOptions { command: string; mode: RuntimeMode; repositories: Repositories; provider: JarvisAiProvider; researchService?: ResearchService; inputSource?: "text" | "voice"; voiceSessionId?: string; voiceCommandId?: string; onEvent?: (event: JarvisEvent) => void | Promise<void> }
 
 function safeParseArguments(raw: string): unknown { try { return JSON.parse(raw); } catch { return null; } }
-function approvalAction(toolName: string): Approval["actionType"] { if (toolName === "send_email") return "send_email"; return "update_crm"; }
-function approvalPresentation(toolName: string, args: Record<string, unknown>) { return { recipient: typeof args.recipient === "string" ? args.recipient : "CRM record", subject: typeof args.subject === "string" ? args.subject : toolName.replaceAll("_", " "), preview: typeof args.preview === "string" ? args.preview : JSON.stringify(args) }; }
+function approvalAction(toolName: string): Approval["actionType"] { if (toolName === "send_email") return "send_email"; if (toolName === "create_calendar_event" || toolName === "update_calendar_event" || toolName === "delete_calendar_event") return toolName; return "update_crm"; }
+function approvalPresentation(toolName: string, args: Record<string, unknown>) { return { recipient: typeof args.recipient === "string" ? args.recipient : Array.isArray(args.attendees) ? args.attendees.join(", ") || "Primary calendar" : "CRM record", subject: typeof args.subject === "string" ? args.subject : typeof args.title === "string" ? args.title : toolName.replaceAll("_", " "), preview: typeof args.body === "string" ? args.body : typeof args.preview === "string" ? args.preview : JSON.stringify(args) }; }
 
 export async function runJarvisLoop({ command, mode, repositories, provider, researchService, inputSource = "text", voiceSessionId, voiceCommandId, onEvent }: RunOptions) {
+  const workspace = createWorkspaceProviders(repositories, mode);
   let run = await repositories.runs.createRun(command);
   if (inputSource === "voice" && voiceSessionId && voiceCommandId) {
     run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), inputSource: "voice", voiceSessionId, voiceCommandId } });
@@ -61,6 +63,7 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
           const approval = await repositories.approvals.create({ runId: run.id, actionType: approvalAction(call.name), payload: { toolName: call.name, input: validation.data, stepId: step.id }, ...presentation });
           await repositories.runs.updateStep(step.id, { status: "waiting_for_approval", description: "Validated and paused before external or sensitive execution." });
           await repositories.activity.create({ eventType: "system", title: "Approval requested", description: presentation.subject, metadata: { approvalId: approval.id, runId: run.id, toolName: call.name } });
+          await repositories.notifications.create({ type: "APPROVAL_REQUIRED", priority: "important", title: call.name === "send_email" ? "Email approval required" : call.name.includes("calendar") ? "Calendar approval required" : "Action approval required", body: presentation.subject, entityType: "approval", entityId: approval.id, metadata: { approvalId: approval.id, runId: run.id, toolName: call.name, dedupeKey: `approval-${approval.id}` } });
           run = await repositories.runs.updateRun(run.id, { status: "waiting_for_approval", summary: "JARVIS prepared an action and is waiting for your approval." });
           run = (await repositories.runs.getRun(run.id)) ?? run;
           log("approval_requested", { runId: run.id, approvalId: approval.id, toolName: call.name });
@@ -69,7 +72,7 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
           return { run, approval, message: run.summary };
         }
         log("tool_called", { runId: run.id, toolName: call.name });
-        const result = await executeTool(call.name, validation.data, { context: { repositories, mode, jarvisRunId: run.id, researchService, emitProgress: async (description, metadata) => { await repositories.runs.updateStep(step.id, { status: "running", description, output: metadata }); if (metadata?.researchRunId) run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), researchRunId: metadata.researchRunId, researchStatus: metadata.researchStatus, researchProcessed: metadata.processed, researchTotal: metadata.total } }); run = (await repositories.runs.getRun(run.id)) ?? run; await onEvent?.({ type: "step", run }); } } });
+        const result = await executeTool(call.name, validation.data, { context: { repositories, mode, jarvisRunId: run.id, researchService, workspace, emitProgress: async (description, metadata) => { await repositories.runs.updateStep(step.id, { status: "running", description, output: metadata }); if (metadata?.researchRunId) run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), researchRunId: metadata.researchRunId, researchStatus: metadata.researchStatus, researchProcessed: metadata.processed, researchTotal: metadata.total } }); run = (await repositories.runs.getRun(run.id)) ?? run; await onEvent?.({ type: "step", run }); } } });
         if (result.ok) {
           await repositories.runs.updateStep(step.id, { status: "completed", description: `${call.name} completed.`, output: result.value });
           const value = result.value as Record<string, unknown>;
