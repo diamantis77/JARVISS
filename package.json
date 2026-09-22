@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:jarvis": "node scripts/dev-jarvis.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
