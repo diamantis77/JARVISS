@@ -4,6 +4,7 @@ export interface EmailProvider {
   listThreads(input: { maxResults: number }): Promise<EmailThreadSummary[]>;
   searchThreads(input: { query: string; maxResults: number }): Promise<EmailThreadSummary[]>;
   getThread(threadId: string): Promise<EmailThreadDetail>;
+  createDraft(input: { to: string; subject: string; body: string; threadId?: string | null; inReplyTo?: string | null }): Promise<{ draftId: string; messageId: string | null; threadId: string | null }>;
   sendMessage(input: { to: string; subject: string; body: string; threadId?: string | null; inReplyTo?: string | null }): Promise<{ messageId: string; threadId: string }>;
 }
 export interface CalendarProvider {

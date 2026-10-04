@@ -4,6 +4,7 @@ import type { JobQueue } from "./contracts";
 import { classifyJobError, retryAt } from "./retry-policy";
 import { executeBackgroundJob } from "./executor";
 import { operationLog } from "@/lib/operations/events";
+import { RepositoryError } from "@/lib/repositories/supabase/shared";
 
 export async function runWorkerOnce(queue: JobQueue, db: SupabaseClient, workerId: string) {
   const job = await queue.claim(workerId); if (!job) return null;
@@ -19,7 +20,9 @@ export async function runWorkerOnce(queue: JobQueue, db: SupabaseClient, workerI
     if (repositories && /^(gmail|calendar|provider_)/.test(job.jobType)) { const capability = job.jobType.startsWith("calendar") ? "calendar" as const : "gmail" as const; const connection = await repositories.connections.getGoogle(); if (connection) { const health = (await repositories.connections.listHealth()).find((item) => item.capability === capability); await repositories.connections.upsertHealth({ connectionId: connection.id, capability, status: decision.category === "credentials" ? "needs_reconnect" : canRetry ? "degraded" : "error", lastSuccessfulApiCallAt: health?.lastSuccessfulApiCallAt ?? null, lastSyncAt: health?.lastSyncAt ?? null, lastWebhookAt: health?.lastWebhookAt ?? null, watchExpiration: health?.watchExpiration ?? null, consecutiveFailures: (health?.consecutiveFailures ?? 0) + 1, lastErrorCategory: decision.category, lastErrorSummary: decision.safeSummary }); } }
     if (canRetry) await queue.retry(job.id, workerId, decision.safeSummary, retryAt(job.attemptCount));
     else { await queue.fail(job.id, workerId, decision.safeSummary, true); if (repositories) await repositories.notifications.create({ type: "PROVIDER_ERROR", priority: decision.category === "credentials" ? "urgent" : "important", title: "Background operation needs attention", body: decision.safeSummary, entityType: "background_job", entityId: job.id, metadata: { dedupeKey: `job-dead-letter:${job.id}`, correlationId: job.correlationId, jobType: job.jobType } }); }
-    operationLog("job_failed", { jobId: job.id, correlationId: job.correlationId, userId: job.userId, jobType: job.jobType, attempt: job.attemptCount, durationMs: Date.now() - started, outcome: canRetry ? "retrying" : "dead_letter", errorCategory: decision.category });
+    const internalFailure = error instanceof RepositoryError ? error.operation
+      : error instanceof Error && /^(Unable to |Google authorization expired|Gmail did not)/.test(error.message) ? error.message : null;
+    operationLog("job_failed", { jobId: job.id, correlationId: job.correlationId, userId: job.userId, jobType: job.jobType, attempt: job.attemptCount, durationMs: Date.now() - started, outcome: canRetry ? "retrying" : "dead_letter", errorCategory: decision.category, errorClass: error instanceof Error ? error.constructor.name : "unknown", internalFailure });
     return { job, outcome: canRetry ? "retrying" as const : "dead_letter" as const };
   }
 }

@@ -1,18 +1,19 @@
 export type LeadStatus = "new" | "analyzed" | "qualified" | "contacted" | "interested" | "meeting" | "won" | "lost";
+export type DealStage = "new" | "analyzed" | "qualified" | "contacted" | "interested" | "proposal" | "negotiation" | "won" | "lost";
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "waiting_for_approval" | "cancelled";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ProviderCapability = "gmail" | "calendar";
 export type NotificationPriority = "info" | "important" | "urgent";
 export type ToolPermission = "SAFE_AUTOMATIC" | "REQUIRES_USER_APPROVAL";
 export type JarvisState = "idle" | "listening" | "thinking" | "executing" | "success" | "error";
-export type VoiceState = "idle" | "requesting_microphone" | "connecting" | "listening" | "user_speaking" | "processing" | "jarvis_speaking" | "interrupted" | "reconnecting" | "error" | "disconnected";
+export type VoiceState = "idle" | "wake_initializing" | "wake_waiting" | "wake_detected" | "requesting_microphone" | "connecting" | "listening" | "user_speaking" | "processing" | "jarvis_speaking" | "interrupted" | "reconnecting" | "error" | "disconnected";
 export type EvidenceConfidence = "verified" | "high" | "medium" | "low" | "unknown";
 export type ResearchStatus = "pending" | "running" | "partial" | "completed" | "cancelled" | "failed";
 export type ResearchCandidateStatus = "discovered" | "verified" | "analyzed" | "qualified" | "failed" | "skipped";
-export type BackgroundJobType = "gmail_sync" | "gmail_watch_renewal" | "calendar_sync" | "calendar_watch_renewal" | "provider_health_check" | "research_continue" | "notification_process" | "notification_cleanup" | "provider_reconciliation" | "daily_brief";
+export type BackgroundJobType = "gmail_sync" | "gmail_watch_renewal" | "calendar_sync" | "calendar_watch_renewal" | "provider_health_check" | "research_continue" | "notification_process" | "notification_cleanup" | "provider_reconciliation" | "daily_brief" | "outbound_jarvis_call" | "mission_tick" | "mission_brief";
 export type BackgroundJobStatus = "pending" | "scheduled" | "running" | "retrying" | "completed" | "failed" | "cancelled" | "dead_letter";
 export type ProviderHealthStatus = "healthy" | "degraded" | "needs_reconnect" | "watch_expiring" | "disconnected" | "error";
-export type InternalEventType = "EMAIL_RECEIVED" | "LEAD_REPLIED" | "HOT_LEAD_DETECTED" | "MEETING_REQUEST_DETECTED" | "MEETING_STARTING_SOON" | "RESEARCH_COMPLETED" | "APPROVAL_PENDING" | "PROVIDER_DISCONNECTED" | "DAILY_BRIEF_READY";
+export type InternalEventType = "EMAIL_RECEIVED" | "LEAD_REPLIED" | "HOT_LEAD_DETECTED" | "MEETING_REQUEST_DETECTED" | "MEETING_STARTING_SOON" | "RESEARCH_COMPLETED" | "APPROVAL_PENDING" | "PROVIDER_DISCONNECTED" | "DAILY_BRIEF_READY" | "HIGH_VALUE_DEAL" | "CUSTOM_PRIORITY_EVENT";
 
 export interface Lead {
   id: string;
@@ -34,6 +35,14 @@ export interface Lead {
   evidenceIds?: string[];
   researchConfidence?: EvidenceConfidence;
   lastResearchedAt?: string | null;
+  estimatedValue?: number | null;
+  currency?: string;
+  dealStage?: DealStage | null;
+  stageProbability?: number | null;
+  expectedCloseAt?: string | null;
+  wonAt?: string | null;
+  lostAt?: string | null;
+  actualRevenue?: number | null;
 }
 
 export interface LeadAnalysis {
@@ -134,8 +143,14 @@ export interface BusinessSettings {
   researchFetchTimeoutMs: number;
   researchMaxConcurrency: number;
   researchAiAnalysisEnabled: boolean;
-  jarvisVoice: "marin" | "cedar" | "coral" | "alloy";
+  jarvisVoice: "cedar";
   voiceMode: "conversation" | "push_to_talk";
+  wakeModeEnabled: boolean;
+  wakePhrase: "Hey Jarvis";
+  preferredFormOfAddress: string;
+  wakeSoundEnabled: boolean;
+  voiceConversationIdleTimeoutMs: number;
+  voiceMicrophoneDeviceId: string;
   timezone: string;
   dailyBriefEnabled: boolean;
   dailyBriefTime: string;
@@ -159,6 +174,67 @@ export interface VoiceTranscript {
   role: "user" | "assistant";
   text: string;
   createdAt: string;
+}
+
+export type PhoneCallStatus = "queued" | "dialing" | "ringing" | "in_progress" | "completed" | "failed" | "busy" | "no_answer" | "cancelled";
+export type TelephonyProviderName = "twilio" | "vonage";
+
+export interface PhoneCall {
+  id: string;
+  userId: string;
+  direction: "outbound";
+  provider: TelephonyProviderName;
+  providerCallId: string | null;
+  providerStatus: string | null;
+  status: PhoneCallStatus;
+  reason: string;
+  context: Record<string, unknown>;
+  jarvisRunId: string | null;
+  startedAt: string | null;
+  answeredAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  liveSessionDurationSeconds: number | null;
+  errorCategory: string | null;
+  errorSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PhoneNotificationSettings {
+  enabled: boolean;
+  allowedStart: string;
+  allowedEnd: string;
+  outsideHours: "never" | "urgent_only";
+  customerReplyOutsideHours: boolean;
+  morningBrief: boolean;
+  hotLeadReply: boolean;
+  importantCustomerReply: boolean;
+  meetingSoon: boolean;
+  criticalProviderFailure: boolean;
+  highValueDeal: boolean;
+  customPriorityEvent: boolean;
+  maxCallMinutes: number;
+}
+
+export type TelephonyReadiness = "not_configured" | "public_endpoint_missing" | "ready" | "degraded";
+
+export interface TelephonyStatus {
+  readiness: TelephonyReadiness;
+  health: "healthy" | "degraded" | "not_configured" | "public_endpoint_missing" | "error";
+  provider: TelephonyProviderName;
+  credentialsConfigured: boolean;
+  applicationConfigured: boolean;
+  callerNumberConfigured: boolean;
+  ownerNumberConfigured: boolean;
+  publicEndpointConfigured: boolean;
+  openAiBridgeConfigured: boolean;
+  maskedProviderNumber: string | null;
+  maskedTwilioNumber: string | null;
+  maskedVonageNumber: string | null;
+  maskedOwnerNumber: string | null;
+  liveTestEnabled: boolean;
+  lastError: string | null;
 }
 
 export interface ProviderConnection {

@@ -23,7 +23,7 @@ export function createDemoRepositories(): Repositories {
   const providerHealth: ProviderHealth[] = [];
   const jobQueue = new MemoryJobQueue();
   const notifications: JarvisNotification[] = [{ id: "notification-demo-reply", type: "EMAIL_REPLY", priority: "important", title: "Demo reply from Papadopoulos Dental", body: "Fictional customer asked about availability tomorrow.", entityType: "email_thread", entityId: "demo-thread-1", readAt: null, dismissedAt: null, metadata: { demo: true }, createdAt: new Date().toISOString() }];
-  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Operator", businessName: "Northstar Studio", defaultLanguage: "en", targetIndustries: ["Healthcare"], targetLocations: ["Larissa", "Kos"], minimumLeadScore: 70, companyServices: ["Web design", "Growth strategy"], companyDescription: "Digital growth services for local professional businesses.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "marin", voiceMode: "conversation", timezone: "Europe/Athens", dailyBriefEnabled: false, dailyBriefTime: "08:30" };
+  let settings: BusinessSettings = { userId: "demo-user", fullName: "Demo Χρήστης", businessName: "Northstar Studio", defaultLanguage: "el-GR", targetIndustries: ["Υγεία"], targetLocations: ["Λάρισα", "Κως"], minimumLeadScore: 70, companyServices: ["Σχεδιασμός ιστοτόπων", "Στρατηγική ανάπτυξης"], companyDescription: "Υπηρεσίες ψηφιακής ανάπτυξης για τοπικές επαγγελματικές επιχειρήσεις.", researchMaxLeads: 20, researchMaxPagesPerSite: 5, researchFetchTimeoutMs: 8000, researchMaxConcurrency: 2, researchAiAnalysisEnabled: false, jarvisVoice: "cedar", voiceMode: "conversation", wakeModeEnabled: true, wakePhrase: "Hey Jarvis", preferredFormOfAddress: "κύριε", wakeSoundEnabled: true, voiceConversationIdleTimeoutMs: 120000, voiceMicrophoneDeviceId: "", timezone: "Europe/Athens", dailyBriefEnabled: false, dailyBriefTime: "08:30" };
   return {
     leads: {
       async list() { return [...leads].sort((a, b) => b.score - a.score); },
@@ -39,6 +39,9 @@ export function createDemoRepositories(): Repositories {
       async getByProviderMessageId(provider, messageId) { return interactions.find((item) => item.provider === provider && item.providerMessageId === messageId) ?? null; },
       async create(input) { const item = { ...input, id: `interaction_${crypto.randomUUID()}`, createdAt: new Date().toISOString() }; interactions.push(item); return item; },
       async updateStatus(id, status) { const item = interactions.find((entry) => entry.id === id); if (!item) throw new Error("Interaction not found"); item.status = status; return item; },
+      async claimDraftForSend(id) { const item = interactions.find((entry) => entry.id === id); if (!item || item.status !== "draft") return false; item.status = "sending"; return true; },
+      async recordSent(id, messageId, threadId) { const item = interactions.find((entry) => entry.id === id); if (!item || item.status !== "sending") throw new Error("Email draft is not in sending state"); item.status = "sent"; item.providerMessageId = messageId; item.providerThreadId = threadId; return item; },
+      async isMissionContactSuppressed() { return false; },
     },
     tasks: {
       async list(status) { return status ? tasks.filter((task) => task.status === status) : [...tasks]; },
@@ -73,6 +76,7 @@ export function createDemoRepositories(): Repositories {
     research: {
       async createRun(input) { const run: ResearchRun = { id: `research_${crypto.randomUUID()}`, jarvisRunId: input.jarvisRunId, query: input.query, industry: input.industry, location: input.location, requestedLimit: input.requestedLimit, status: "running", discoveredCount: 0, verifiedCount: 0, analyzedCount: 0, qualifiedCount: 0, failedCount: 0, processedCount: 0, config: input.config, createdAt: new Date().toISOString(), completedAt: null }; researchRuns.unshift(run); return run; },
       async getRun(id) { return researchRuns.find((run) => run.id === id) ?? null; },
+      async listRecent(limit) { return researchRuns.slice(0, limit); },
       async updateRun(id, patch) { const run = researchRuns.find((item) => item.id === id); if (!run) throw new Error("Research run not found"); Object.assign(run, patch); return run; },
       async addCandidates(runId, candidates) { const added: ResearchCandidate[] = []; for (const input of candidates) { if (researchCandidates.some((item) => item.researchRunId === runId && item.normalizedKey === input.normalizedKey)) continue; const candidate: ResearchCandidate = { ...input, id: `candidate_${crypto.randomUUID()}`, researchRunId: runId, leadId: null, error: null, createdAt: new Date().toISOString() }; researchCandidates.push(candidate); added.push(candidate); } return added; },
       async listCandidates(runId) { return researchCandidates.filter((item) => item.researchRunId === runId); },
@@ -122,6 +126,7 @@ export function createDemoRepositories(): Repositories {
       async retryJob(id) { const job = await jobQueue.getJob(id, "demo-user"); if (!job) throw new Error("Job not found"); return jobQueue.enqueue({ userId: "demo-user", jobType: job.jobType, payload: job.payload, deduplicationKey: `${job.deduplicationKey ?? job.id}:retry:${Date.now()}` }); },
       async cancelJob(id) { return jobQueue.cancel(id, "demo-user"); },
     },
+    missions: { async today() { return { available: false, missions: [] }; } },
   };
 }
 

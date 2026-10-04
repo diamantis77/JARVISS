@@ -8,17 +8,19 @@ import { log } from "../logger";
 import type { Approval, JarvisRun } from "../../types";
 import type { ResearchService } from "../research/contracts";
 import { createWorkspaceProviders } from "../workspace/factory";
+import { selfTestEmailBlockReason } from "../email/self-test";
 
 export type JarvisEvent = { type: "run" | "step" | "approval" | "complete" | "error"; run: JarvisRun; approval?: Approval; message?: string };
-interface RunOptions { command: string; mode: RuntimeMode; repositories: Repositories; provider: JarvisAiProvider; researchService?: ResearchService; inputSource?: "text" | "voice"; voiceSessionId?: string; voiceCommandId?: string; onEvent?: (event: JarvisEvent) => void | Promise<void> }
+interface RunOptions { command: string; mode: RuntimeMode; repositories: Repositories; provider: JarvisAiProvider; researchService?: ResearchService; inputSource?: "text" | "voice" | "phone"; voiceSessionId?: string; voiceCommandId?: string; voiceConversationContext?: Array<{ role: "user" | "assistant"; text: string }>; onEvent?: (event: JarvisEvent) => void | Promise<void> }
 
 function safeParseArguments(raw: string): unknown { try { return JSON.parse(raw); } catch { return null; } }
-function approvalAction(toolName: string): Approval["actionType"] { if (toolName === "send_email") return "send_email"; if (toolName === "create_calendar_event" || toolName === "update_calendar_event" || toolName === "delete_calendar_event") return toolName; return "update_crm"; }
+function approvalAction(toolName: string): Approval["actionType"] { if (toolName === "send_email" || toolName === "send_self_test_email") return "send_email"; if (toolName === "create_calendar_event" || toolName === "update_calendar_event" || toolName === "delete_calendar_event") return toolName; return "update_crm"; }
 function approvalPresentation(toolName: string, args: Record<string, unknown>) { return { recipient: typeof args.recipient === "string" ? args.recipient : Array.isArray(args.attendees) ? args.attendees.join(", ") || "Primary calendar" : "CRM record", subject: typeof args.subject === "string" ? args.subject : typeof args.title === "string" ? args.title : toolName.replaceAll("_", " "), preview: typeof args.body === "string" ? args.body : typeof args.preview === "string" ? args.preview : JSON.stringify(args) }; }
 
-export async function runJarvisLoop({ command, mode, repositories, provider, researchService, inputSource = "text", voiceSessionId, voiceCommandId, onEvent }: RunOptions) {
+export async function runJarvisLoop({ command, mode, repositories, provider, researchService, inputSource = "text", voiceSessionId, voiceCommandId, voiceConversationContext = [], onEvent }: RunOptions) {
   const workspace = createWorkspaceProviders(repositories, mode);
   let run = await repositories.runs.createRun(command);
+  if (inputSource === "phone") run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), inputSource: "phone" } });
   if (inputSource === "voice" && voiceSessionId && voiceCommandId) {
     run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), inputSource: "voice", voiceSessionId, voiceCommandId } });
     await repositories.voice.addTranscript({ voiceSessionId, jarvisRunId: run.id, commandId: voiceCommandId, role: "user", text: command });
@@ -27,14 +29,22 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
   log("run_started", { runId: run.id, mode });
   await onEvent?.({ type: "run", run });
   const understanding = await repositories.runs.addStep(run.id, { order: 1, title: "Understanding request", description: "Validated the command and prepared a constrained execution context.", status: "completed", toolName: "plan_request", output: { accepted: true } });
-  run = await repositories.runs.updateRun(run.id, { currentStep: 1 });
-  run = (await repositories.runs.getRun(run.id)) ?? { ...run, steps: [understanding] };
+  const updatedRun = await repositories.runs.updateRun(run.id, { currentStep: 1 });
+  run = { ...updatedRun, steps: updatedRun.steps.some((step) => step.id === understanding.id) ? updatedRun.steps : [...run.steps, understanding] };
   await onEvent?.({ type: "step", run });
   try {
-    const settings = await repositories.settings.get();
-    const recentRuns = await repositories.runs.listRecentRuns(4);
-    const memory = { owner: settings.fullName || "Unknown", business: settings.businessName || "Unknown", services: settings.companyServices, targets: { industries: settings.targetIndustries, locations: settings.targetLocations }, preferredLanguage: settings.defaultLanguage, minimumLeadScore: settings.minimumLeadScore, recentRuns: recentRuns.filter((item) => item.id !== run.id).slice(0, 3).map((item) => ({ request: item.request, summary: item.summary, context: item.context })) };
-    let turn = await provider.respond({ instructions: JARVIS_INSTRUCTIONS_V2, input: `Current date: ${new Date().toISOString()}\nRuntime mode: ${mode}. Demo data must be identified as fictional.\nRelevant structured memory: ${JSON.stringify(memory)}\n\nOwner command: ${command}`, tools: openAiTools() });
+    const [settings, recentRuns] = await Promise.all([repositories.settings.get(), repositories.runs.listRecentRuns(4)]);
+    const memory = { owner: settings.fullName || "Unknown", business: settings.businessName || "Unknown", services: settings.companyServices, targets: { industries: settings.targetIndustries, locations: settings.targetLocations }, preferredLanguage: settings.defaultLanguage, preferredFormOfAddress: settings.preferredFormOfAddress, minimumLeadScore: settings.minimumLeadScore, activeVoiceContext: voiceConversationContext.slice(-8), recentRuns: recentRuns.filter((item) => item.id !== run.id).slice(0, 3).map((item) => ({ request: item.request, summary: item.summary, context: item.context })) };
+    const recordAiRouting = async (routing?: { provider: string; model: string; latencyMs: number; fallbackUsed: boolean; attempts: Array<{ provider: string; model: string; success: boolean; reason?: string; latencyMs: number }> }) => {
+      if (!routing) return;
+      const previous = run.context?.aiRouting as typeof routing | undefined;
+      const combined = { ...routing, latencyMs: (previous?.latencyMs ?? 0) + routing.latencyMs,
+        fallbackUsed: Boolean(previous?.fallbackUsed || routing.fallbackUsed),
+        attempts: [...(previous?.attempts ?? []), ...routing.attempts].slice(-24) };
+      run = await repositories.runs.updateRun(run.id, { context: { ...(run.context ?? {}), aiRouting: combined } });
+    };
+    let turn = await provider.respond({ instructions: JARVIS_INSTRUCTIONS_V2, input: `Current date: ${new Date().toISOString()}\nRuntime mode: ${mode}. Demo data must be identified as fictional.\nInteraction channel: ${inputSource}. Use recent conversation for references and tone, not as proof of current business state or completed actions.\nRelevant structured memory: ${JSON.stringify(memory)}\n\nOwner command: ${command}`, tools: openAiTools() });
+    await recordAiRouting(turn.routing);
     let iteration = 0;
     while (turn.toolCalls.length > 0 && iteration < 8) {
       iteration += 1;
@@ -59,12 +69,24 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
           continue;
         }
         if (tool.permission === "REQUIRES_USER_APPROVAL") {
+          if (call.name === "send_self_test_email") {
+            const input = validation.data as { recipient: string; accountEmail: string };
+            const blocked = await selfTestEmailBlockReason(repositories, mode, input.recipient, input.accountEmail);
+            if (blocked) {
+              await repositories.runs.updateStep(step.id, { status: "failed", error: blocked });
+              outputs.push({ callId: call.callId, output: JSON.stringify({ error: blocked, sent: false }) });
+              continue;
+            }
+          }
           const presentation = approvalPresentation(call.name, validation.data as Record<string, unknown>);
           const approval = await repositories.approvals.create({ runId: run.id, actionType: approvalAction(call.name), payload: { toolName: call.name, input: validation.data, stepId: step.id }, ...presentation });
           await repositories.runs.updateStep(step.id, { status: "waiting_for_approval", description: "Validated and paused before external or sensitive execution." });
           await repositories.activity.create({ eventType: "system", title: "Approval requested", description: presentation.subject, metadata: { approvalId: approval.id, runId: run.id, toolName: call.name } });
-          await repositories.notifications.create({ type: "APPROVAL_REQUIRED", priority: "important", title: call.name === "send_email" ? "Email approval required" : call.name.includes("calendar") ? "Calendar approval required" : "Action approval required", body: presentation.subject, entityType: "approval", entityId: approval.id, metadata: { approvalId: approval.id, runId: run.id, toolName: call.name, dedupeKey: `approval-${approval.id}` } });
-          run = await repositories.runs.updateRun(run.id, { status: "waiting_for_approval", summary: "JARVIS prepared an action and is waiting for your approval." });
+          await repositories.notifications.create({ type: "APPROVAL_REQUIRED", priority: "important", title: approvalAction(call.name) === "send_email" ? "Email approval required" : call.name.includes("calendar") ? "Calendar approval required" : "Action approval required", body: presentation.subject, entityType: "approval", entityId: approval.id, metadata: { approvalId: approval.id, runId: run.id, toolName: call.name, dedupeKey: `approval-${approval.id}` } });
+          const approvalMessage = approvalAction(call.name) === "send_email"
+            ? `Ετοίμασα email προς ${presentation.recipient} με θέμα «${presentation.subject}». Είναι σωστός ο παραλήπτης; Για να σταλεί, ελέγξτε το πλήρες μήνυμα και πατήστε «Έγκριση» στο JARVIS. Δεν έχει σταλεί ακόμη.`
+            : "Η ενέργεια είναι έτοιμη και περιμένει την έγκρισή σας στο JARVIS. Δεν έχει εκτελεστεί ακόμη.";
+          run = await repositories.runs.updateRun(run.id, { status: "waiting_for_approval", summary: approvalMessage });
           run = (await repositories.runs.getRun(run.id)) ?? run;
           log("approval_requested", { runId: run.id, approvalId: approval.id, toolName: call.name });
           await onEvent?.({ type: "approval", run, approval, message: run.summary });
@@ -90,17 +112,18 @@ export async function runJarvisLoop({ command, mode, repositories, provider, res
         await onEvent?.({ type: "step", run });
       }
       turn = await provider.respond({ instructions: JARVIS_INSTRUCTIONS_V2, previousResponseId: turn.responseId, toolOutputs: outputs, tools: openAiTools() });
+      await recordAiRouting(turn.routing);
     }
     if (iteration >= 8 && turn.toolCalls.length) throw new Error("Tool iteration limit reached");
-    const message = turn.text.trim() || "JARVIS completed the run without a text response.";
-    const researchPending = run.context?.researchStatus === "partial";
-    run = await repositories.runs.updateRun(run.id, { status: researchPending ? "running" : "completed", summary: researchPending ? `${message} Research progress is persisted and will continue in the next batch.` : message, providerResponseId: turn.responseId });
+    const message = turn.text.trim() || "Η εργασία ολοκληρώθηκε, αλλά δεν έχω απάντηση να σας διαβάσω.";
+    const researchPending = run.context?.researchStatus === "partial" || run.context?.researchStatus === "pending";
+    run = await repositories.runs.updateRun(run.id, { status: "completed", summary: researchPending ? `${message} Η πρόοδος της έρευνας αποθηκεύτηκε και θα συνεχιστεί στο παρασκήνιο.` : message, providerResponseId: turn.responseId });
     run = (await repositories.runs.getRun(run.id)) ?? run;
     await onEvent?.({ type: "complete", run, message: run.summary });
     await persistVoiceResponse(run.summary);
     return { run, message: run.summary };
   } catch {
-    run = await repositories.runs.updateRun(run.id, { status: "failed", summary: "JARVIS could not complete this run. Please try again." });
+    run = await repositories.runs.updateRun(run.id, { status: "failed", summary: "Δεν μπόρεσα να ολοκληρώσω το αίτημα. Δοκιμάστε ξανά." });
     run = (await repositories.runs.getRun(run.id)) ?? run;
     await onEvent?.({ type: "error", run, message: run.summary });
     await persistVoiceResponse(run.summary);

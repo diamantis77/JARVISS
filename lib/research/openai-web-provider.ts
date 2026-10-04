@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { Response as OpenAIResponse } from "openai/resources/responses/responses";
 import { z } from "zod";
+import { allowPaidFallback } from "../ai/routing-config";
 import type { BusinessDiscoveryProvider, DiscoveredBusiness, WebResearchProvider, WebSearchResult } from "./contracts";
 
 const resultSchema = z.object({ title: z.string(), url: z.string().url(), snippet: z.string().default(""), sourceType: z.enum(["official_website", "official_profile", "directory", "search_result"]).default("search_result") });
@@ -26,11 +27,17 @@ function citedResults(response: OpenAIResponse) {
 }
 
 function safeHttpUrl(value: string) { try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null; } catch { return null; } }
+function safeProviderError(error: unknown, operation: string) {
+  if (error instanceof OpenAI.APIError) return `${operation}: OpenAI API HTTP ${error.status}${error.code ? ` (${error.code})` : ""}.`;
+  if (error instanceof Error && error.name === "ZodError") return `${operation}: provider response failed structured validation.`;
+  if (error instanceof SyntaxError) return `${operation}: provider response was not valid JSON.`;
+  return `${operation}: provider request failed (${error instanceof Error ? error.name : "unknown error"}).`;
+}
 
 export class OpenAIWebResearchProvider implements WebResearchProvider, BusinessDiscoveryProvider {
   readonly name = "openai-web-search";
   private readonly client: OpenAI;
-  constructor(apiKey = process.env.OPENAI_API_KEY, private readonly model = process.env.OPENAI_RESEARCH_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5") { if (!apiKey) throw new Error("OPENAI_API_KEY is not configured"); this.client = new OpenAI({ apiKey, timeout: 45_000, maxRetries: 1 }); }
+  constructor(apiKey = process.env.OPENAI_API_KEY, private readonly model = process.env.OPENAI_RESEARCH_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-5") { if (!apiKey || !allowPaidFallback()) throw new Error("OpenAI cited research is unavailable or paid fallback is disabled"); this.client = new OpenAI({ apiKey, timeout: 45_000, maxRetries: 0 }); }
 
   private async research(prompt: string) {
     return this.client.responses.create({ model: this.model, tools: [{ type: "web_search", search_context_size: "medium", external_web_access: true }], tool_choice: "required", include: ["web_search_call.action.sources"], instructions: "Use live public web search. Return only the requested JSON object. Never invent businesses, URLs, contact details, or facts. Search snippets are discovery evidence, not verified facts. Prefer official first-party sources and keep uncertain values null.", input: prompt });
@@ -42,12 +49,12 @@ export class OpenAIWebResearchProvider implements WebResearchProvider, BusinessD
       const citations = citedResults(response); const parsed = searchSchema.parse(jsonObject(response.output_text));
       const results = parsed.results.flatMap((result) => { const url = safeHttpUrl(result.url); const citation = url ? citations.get(citationKey(url)) : null; if (!url || !citation) return []; return [{ ...result, title: citation.title || result.title, url: citation.url }]; }).slice(0, maxResults);
       return { results };
-    } catch { return { results: [], error: "Live web search failed." }; }
+    } catch (error) { return { results: [], error: safeProviderError(error, "Live web search") }; }
   }
 
-  async discover({ industry, location, limit, criteria }: { industry: string; location: string; limit: number; criteria?: Record<string, unknown> }) {
+  async discover({ industry, location, limit, criteria, searchFocus }: { industry: string; location: string; limit: number; criteria?: Record<string, unknown>; searchFocus?: string }) {
     try {
-      const response = await this.research(`Discover real public businesses for legitimate B2B research.\nIndustry: ${industry}\nLocation: ${location}\nMaximum candidates: ${limit}\nCriteria: ${JSON.stringify(criteria ?? {})}\nSeparate discovery from verification. Use an official website only when identity and location match. Return {"businesses":[{"businessName":"","industry":"","location":"","officialWebsite":null,"phone":null,"email":null,"confidence":"verified|high|medium|low|unknown","sourceUrls":["https://..."]}]}. Contact details may only come from public business sources.`);
+      const response = await this.research(`Discover real public businesses for legitimate B2B research.\nIndustry: ${industry}\nLocation: ${location}\nSearch focus: ${searchFocus ?? `${industry} ${location}`}\nMaximum candidates: ${limit}\nCriteria: ${JSON.stringify(criteria ?? {})}\nSeparate discovery from verification. Use an official website only when identity and location match. Return {"businesses":[{"businessName":"","industry":"","location":"","officialWebsite":null,"phone":null,"email":null,"confidence":"verified|high|medium|low|unknown","sourceUrls":["https://..."]}]}. Contact details may only come from public business sources.`);
       const citations = citedResults(response); const parsed = discoverySchema.parse(jsonObject(response.output_text));
       const businesses: DiscoveredBusiness[] = [];
       for (const candidate of parsed.businesses) {
@@ -59,6 +66,6 @@ export class OpenAIWebResearchProvider implements WebResearchProvider, BusinessD
         businesses.push({ ...candidate, officialWebsite, confidence: officialWebsite && candidate.confidence === "verified" ? "verified" : candidate.confidence === "verified" ? "high" : candidate.confidence, sources });
       }
       return { businesses: businesses.slice(0, limit), searched: true };
-    } catch { return { businesses: [], searched: false, error: "Live business discovery failed." }; }
+    } catch (error) { return { businesses: [], searched: false, error: safeProviderError(error, "Live business discovery") }; }
   }
 }

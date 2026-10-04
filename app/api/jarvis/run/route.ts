@@ -1,13 +1,11 @@
 import { commandSchema, voiceCommandSchema } from "@/lib/validation";
 import { createRequestRepositories } from "@/lib/repositories/factory";
 import { DemoJarvisProvider } from "@/lib/ai/demo-provider";
-import { OpenAIJarvisProvider } from "@/lib/ai/openai-provider";
-import { isOpenAiConfigured } from "@/lib/config/runtime";
+import { RouterJarvisProvider } from "@/lib/ai/router-provider";
+import { hasAnyAiProvider } from "@/lib/ai/routing-config";
 import { runJarvisLoop } from "@/lib/jarvis/tool-loop";
 import { checkSharedRateLimit } from "@/lib/security/distributed-rate-limit";
 import { createResearchService } from "@/lib/research/factory";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { SupabaseJobQueue } from "@/lib/jobs/supabase-queue";
 
 export async function POST(request: Request) {
   const context = await createRequestRepositories();
@@ -27,21 +25,15 @@ export async function POST(request: Request) {
     if (duplicate) return Response.json({ error: "This voice command was already processed." }, { status: 409 });
   }
 
-  const aiMode = context.mode === "live" && isOpenAiConfigured() ? "openai" : "demo";
-  const provider = aiMode === "openai" ? new OpenAIJarvisProvider() : new DemoJarvisProvider();
-  const researchService = createResearchService(context.repositories, context.mode);
+  const aiMode = context.mode === "demo" ? "demo" : hasAnyAiProvider() ? "routed" : "unavailable";
+  const provider = context.mode === "live" ? new RouterJarvisProvider() : new DemoJarvisProvider();
+  const researchService = createResearchService(context.repositories, context.mode, context.userId);
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      void runJarvisLoop({ command, mode: context.mode, repositories: context.repositories, provider, researchService, inputSource: voice ? "voice" : "text", voiceSessionId: voice?.voiceSessionId, voiceCommandId: voice?.voiceCommandId, onEvent: (event) => { controller.enqueue(encoder.encode(`${JSON.stringify({ ...event, mode: context.mode, aiMode })}\n`)); } })
-        .then(async ({ run }) => {
-          const researchRunId = typeof run.context?.researchRunId === "string" ? run.context.researchRunId : null;
-          if (context.mode === "live" && researchRunId && run.context?.researchStatus === "partial") {
-            const processed = Number(run.context.researchProcessed ?? 0);
-            await new SupabaseJobQueue(createAdminClient()).enqueue({ userId: context.userId, jobType: "research_continue", priority: 35, scheduledFor: new Date(Date.now() + 30_000).toISOString(), deduplicationKey: `research-continuation:${researchRunId}:${processed}`, payload: { researchRunId } }).catch(() => undefined);
-          }
-        })
-        .catch(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message: "JARVIS could not complete this run." })}\n`)))
+      void runJarvisLoop({ command, mode: context.mode, repositories: context.repositories, provider, researchService, inputSource: voice ? "voice" : "text", voiceSessionId: voice?.voiceSessionId, voiceCommandId: voice?.voiceCommandId, voiceConversationContext: voice?.voiceContext, onEvent: (event) => { controller.enqueue(encoder.encode(`${JSON.stringify({ ...event, mode: context.mode, aiMode })}\n`)); } })
+        .then(() => undefined)
+        .catch(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message: "Δεν μπόρεσα να ολοκληρώσω το αίτημα." })}\n`)))
         .finally(() => controller.close());
     },
   });

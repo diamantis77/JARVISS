@@ -1,4 +1,5 @@
 import type { Activity } from "@/types";
+import { tr } from "@/lib/i18n";
 export function ActivityPanel({ activities }: { activities: Activity[] }) {
-  return <section className="panel side"><p className="panel-title">Recent activity</p><div className="activity">{activities.map((item) => <div className="activity-row" key={item.id}><time>{item.time}</time><strong>{item.title}</strong><p>{item.description}</p></div>)}</div></section>;
+  return <section className="panel side"><p className="panel-title">{tr("Recent activity")}</p><div className="activity">{activities.map((item) => <div className="activity-row" key={item.id}><time>{item.time}</time><strong>{item.title}</strong><p>{item.description}</p></div>)}</div></section>;
 }

@@ -1,0 +1,29 @@
+appId: com.jarvis.owner.desktop
+productName: JARVIS
+executableName: JARVIS
+artifactName: JARVIS-Setup.${ext}
+directories:
+  output: dist-desktop
+files:
+  - package.json
+  - desktop/dist/**
+  - '!**/.env*'
+  - '!**/*.{pem,key,p12,pfx}'
+extraResources:
+  - from: .desktop-build/jarvis-server
+    to: jarvis-server
+    filter:
+      - '**/*'
+      - '!**/.env*'
+      - '!**/*.{pem,key,p12,pfx}'
+asar: true
+win:
+  target: nsis
+  icon: desktop/dist/assets/jarvis.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: JARVIS

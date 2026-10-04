@@ -20,5 +20,5 @@ export function isVoiceEnabled(mode: RuntimeMode): boolean {
 
 export function getResearchMode(mode: RuntimeMode): "demo" | "live" | "disabled" {
   if (mode === "demo") return "demo";
-  return process.env.LIVE_RESEARCH_ENABLED === "true" && isOpenAiConfigured() ? "live" : "disabled";
+  return process.env.LIVE_RESEARCH_ENABLED === "true" && isOpenAiConfigured() && process.env.AI_ALLOW_PAID_FALLBACK !== "false" ? "live" : "disabled";
 }

@@ -15,8 +15,12 @@ const refreshLocks = new Map<string, Promise<ReturnType<typeof googleOAuthClient
 async function buildAuthorizedClient(repositories: Repositories, connection: ProviderConnection) {
   const client = googleOAuthClient();
   client.setCredentials({ access_token: connection.accessTokenEncrypted ? decryptToken(connection.accessTokenEncrypted) : undefined, refresh_token: connection.refreshTokenEncrypted ? decryptToken(connection.refreshTokenEncrypted) : undefined, expiry_date: connection.tokenExpiresAt ? new Date(connection.tokenExpiresAt).getTime() : undefined, scope: connection.scopes.join(" ") });
-  client.on("tokens", (tokens) => { void repositories.connections.update(connection.id, { accessTokenEncrypted: tokens.access_token ? encryptToken(tokens.access_token) : connection.accessTokenEncrypted, refreshTokenEncrypted: tokens.refresh_token ? encryptToken(tokens.refresh_token) : connection.refreshTokenEncrypted, tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : connection.tokenExpiresAt }); });
-  await client.getAccessToken();
+  const token = await client.getAccessToken();
+  if (!token.token) throw new Error("Google access token unavailable");
+  const refreshed = client.credentials;
+  if (refreshed.access_token && (refreshed.access_token !== (connection.accessTokenEncrypted ? decryptToken(connection.accessTokenEncrypted) : undefined) || refreshed.refresh_token)) {
+    await repositories.connections.update(connection.id, { accessTokenEncrypted: encryptToken(refreshed.access_token), refreshTokenEncrypted: refreshed.refresh_token ? encryptToken(refreshed.refresh_token) : connection.refreshTokenEncrypted, tokenExpiresAt: refreshed.expiry_date ? new Date(refreshed.expiry_date).toISOString() : connection.tokenExpiresAt });
+  }
   return client;
 }
 

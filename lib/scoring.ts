@@ -16,6 +16,7 @@ export interface ScoreV2Input {
   activeBusiness: EvidenceFact<boolean>;
   contactable: EvidenceFact<boolean>;
   websiteQuality: EvidenceFact<"strong" | "needs_work">;
+  websiteStatus?: EvidenceFact<"NO_OFFICIAL_SITE_FOUND" | "VERIFIED_WEBSITE" | "UNCERTAIN" | "UNRESEARCHED">;
   mobileBasics: EvidenceFact<"strong" | "poor">;
   booking: EvidenceFact<"available" | "missing">;
   clearCta: EvidenceFact<boolean>;
@@ -31,6 +32,7 @@ export function scoreLeadV2(input: ScoreV2Input): ScoreV2Result {
   if (usable(input.activeBusiness) && input.activeBusiness.value === true) add("business_activity", 10, "Public evidence indicates an active business.", input.activeBusiness.evidenceIds);
   if (usable(input.contactable) && input.contactable.value === true) add("contactability", 10, "A public business contact path was verified.", input.contactable.evidenceIds);
   if (usable(input.websiteQuality) && input.websiteQuality.value === "needs_work") add("website_conversion", 20, "Analyzed pages show website conversion opportunities.", input.websiteQuality.evidenceIds);
+  if (input.websiteStatus && usable(input.websiteStatus) && input.websiteStatus.value === "NO_OFFICIAL_SITE_FOUND") add("official_site_search_gap", 20, "No official site was found after the recorded name-and-location verification searches; absence is not asserted.", input.websiteStatus.evidenceIds);
   if (usable(input.mobileBasics) && input.mobileBasics.value === "poor") add("mobile_basics", 10, "A mobile viewport was not detected.", input.mobileBasics.evidenceIds);
   if (usable(input.booking) && input.booking.value === "missing") add("booking_gap", 10, "No obvious booking path was detected on analyzed pages.", input.booking.evidenceIds);
   if (usable(input.clearCta) && input.clearCta.value === false) add("cta_gap", 10, "No clear call-to-action was detected on analyzed pages.", input.clearCta.evidenceIds);

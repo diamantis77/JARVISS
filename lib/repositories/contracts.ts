@@ -4,7 +4,7 @@ export interface LeadRepository {
   list(): Promise<Lead[]>;
   getById(id: string): Promise<Lead | null>;
   create(input: Omit<Lead, "id" | "lastActivity">): Promise<Lead>;
-  update(id: string, patch: Partial<Pick<Lead, "businessName" | "category" | "city" | "country" | "website" | "email" | "phone" | "status" | "score" | "scoreReason" | "opportunitySummary" | "reviewCount" | "scoreComponents" | "evidenceIds" | "researchConfidence" | "lastResearchedAt">>): Promise<Lead>;
+  update(id: string, patch: Partial<Pick<Lead, "businessName" | "category" | "city" | "country" | "website" | "email" | "phone" | "status" | "score" | "scoreReason" | "opportunitySummary" | "reviewCount" | "scoreComponents" | "evidenceIds" | "researchConfidence" | "lastResearchedAt" | "estimatedValue" | "currency" | "dealStage" | "stageProbability" | "expectedCloseAt" | "wonAt" | "lostAt" | "actualRevenue">>): Promise<Lead>;
   delete(id: string): Promise<void>;
   search(query: string, limit?: number): Promise<Lead[]>;
 }
@@ -15,6 +15,9 @@ export interface InteractionRepository {
   getByProviderMessageId(provider: string, messageId: string): Promise<Interaction | null>;
   create(input: Omit<Interaction, "id" | "createdAt">): Promise<Interaction>;
   updateStatus(id: string, status: string): Promise<Interaction>;
+  claimDraftForSend(id: string): Promise<boolean>;
+  recordSent(id: string, messageId: string, threadId: string): Promise<Interaction>;
+  isMissionContactSuppressed(email: string): Promise<boolean>;
 }
 
 export interface TaskRepository {
@@ -55,11 +58,14 @@ export interface SettingsRepository {
 export interface ResearchRepository {
   createRun(input: { jarvisRunId: string | null; query: string; industry: string; location: string; requestedLimit: number; config: Record<string, unknown> }): Promise<ResearchRun>;
   getRun(id: string): Promise<ResearchRun | null>;
-  updateRun(id: string, patch: Partial<Pick<ResearchRun, "status" | "discoveredCount" | "verifiedCount" | "analyzedCount" | "qualifiedCount" | "failedCount" | "processedCount" | "completedAt">>): Promise<ResearchRun>;
+  listRecent(limit: number): Promise<ResearchRun[]>;
+  updateRun(id: string, patch: Partial<Pick<ResearchRun, "status" | "discoveredCount" | "verifiedCount" | "analyzedCount" | "qualifiedCount" | "failedCount" | "processedCount" | "completedAt" | "config">>): Promise<ResearchRun>;
+  countRunsSince?(since: string): Promise<number>;
+  summarySince?(since: string, industry?: string): Promise<{ runs: number; completed: number; discovered: number; qualified: number }>;
   addCandidates(runId: string, candidates: Array<Omit<ResearchCandidate, "id" | "researchRunId" | "leadId" | "error" | "createdAt">>): Promise<ResearchCandidate[]>;
   listCandidates(runId: string): Promise<ResearchCandidate[]>;
   listPendingCandidates(runId: string, limit: number): Promise<ResearchCandidate[]>;
-  updateCandidate(id: string, patch: Partial<Pick<ResearchCandidate, "status" | "officialWebsite" | "phone" | "email" | "leadId" | "error">>): Promise<ResearchCandidate>;
+  updateCandidate(id: string, patch: Partial<Pick<ResearchCandidate, "status" | "officialWebsite" | "phone" | "email" | "leadId" | "error" | "sourceResults">>): Promise<ResearchCandidate>;
   claimContinuation(id: string): Promise<ResearchRun>;
   cancel(id: string): Promise<ResearchRun>;
 }
@@ -110,6 +116,27 @@ export interface OperationsRepository {
   cancelJob(id: string): Promise<BackgroundJob>;
 }
 
+export interface MissionToday {
+  id: string;
+  title: string;
+  status: "active" | "paused" | "stopped";
+  runStatus: string | null;
+  discovered: number;
+  qualified: number;
+  outreachSent: number;
+  replies: number;
+  interested: number;
+  meetings: number;
+  pendingApprovals: number;
+  nextAction: string;
+  lastActivityAt: string | null;
+  briefing: string | null;
+}
+
+export interface MissionRepository {
+  today(): Promise<{ available: boolean; missions: MissionToday[] }>;
+}
+
 export interface Repositories {
   leads: LeadRepository;
   interactions: InteractionRepository;
@@ -124,6 +151,7 @@ export interface Repositories {
   connections: ConnectionRepository;
   notifications: NotificationRepository;
   operations: OperationsRepository;
+  missions: MissionRepository;
 }
 
 export type LeadUpdate = { status?: LeadStatus };

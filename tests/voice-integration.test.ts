@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AiTurnRequest, AiTurnResult, JarvisAiProvider } from "../lib/ai/provider";
 import { runJarvisLoop } from "../lib/jarvis/tool-loop";
 import { createDemoRepositories } from "../lib/repositories/demo";
+import { buildVoicePresentationInstructions } from "../lib/voice/instructions";
 
 class QueueProvider implements JarvisAiProvider {
   constructor(private readonly turns: AiTurnResult[]) {}
@@ -11,6 +12,13 @@ class QueueProvider implements JarvisAiProvider {
 const turn = (text: string, toolCalls: AiTurnResult["toolCalls"] = []): AiTurnResult => ({ responseId: `response_${crypto.randomUUID()}`, text, toolCalls });
 
 describe("voice integration", () => {
+  it("keeps conversational follow-ups local while delegating factual business requests", () => {
+    const instructions = buildVoicePresentationInstructions({ language: "el-GR", formOfAddress: "κύριε", timezone: "Europe/Athens" });
+    expect(instructions).toContain("να απλοποιήσεις");
+    expect(instructions).toContain("χωρίς νέα πραγματικά δεδομένα");
+    expect(instructions).toContain("τωρινά business δεδομένα");
+    expect(instructions).toContain("approval object");
+  });
   it("uses the same tool loop and persists only final linked turns", async () => {
     const repositories = createDemoRepositories();
     const session = await repositories.voice.createSession({ providerSessionId: "live-test", model: "gpt-live-1", voice: "marin" });
@@ -44,6 +52,13 @@ describe("voice integration", () => {
     const source = readFileSync(new URL("../lib/voice/browser-provider.ts", import.meta.url), "utf8");
     expect(source).not.toContain("OPENAI_API_KEY");
     expect(source).not.toContain("process.env");
+  });
+
+  it("uses a validated server-side browser voice and keeps approvals in the existing backend", () => {
+    const route = readFileSync(new URL("../app/api/voice/session/route.ts", import.meta.url), "utf8");
+    expect(route).toContain("getBrowserLiveVoice()");
+    expect(route).toContain('delegation: { type: "client" }');
+    expect(route).toContain('store: false');
   });
 
   it("routes Gmail and Calendar voice requests through the existing tool loop", async () => {

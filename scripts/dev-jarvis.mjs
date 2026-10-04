@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 const node = process.execPath;
 const services = [
-  ["app", resolve("node_modules/next/dist/bin/next"), ["dev"]],
+  ["app", resolve("node_modules/tsx/dist/cli.mjs"), ["scripts/next-with-telephony.ts"]],
   ["worker", resolve("node_modules/tsx/dist/cli.mjs"), ["scripts/worker.ts"]],
   ["scheduler", resolve("node_modules/tsx/dist/cli.mjs"), ["scripts/scheduler.ts"]],
 ];
@@ -14,7 +14,7 @@ let stopping = false;
 for (const [name, entrypoint, args] of services) {
   const child = spawn(node, [entrypoint, ...args], {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, NODE_ENV: "development" },
     stdio: "inherit",
     windowsHide: true,
   });

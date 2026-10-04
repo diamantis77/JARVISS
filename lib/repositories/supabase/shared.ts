@@ -17,6 +17,7 @@ export function mapLead(row: Record<string, unknown>): Lead {
     source: row.source === "demo" ? "demo" : "provider", status: row.status as Lead["status"], score: Number(row.score ?? 0), scoreReason: String(row.score_reason ?? "Unknown"),
     opportunitySummary: String(row.opportunity_summary ?? "Unknown"), reviewCount: row.review_count === null || row.review_count === undefined ? null : Number(row.review_count), lastActivity: String(row.updated_at ?? row.created_at ?? "Unknown"),
     scoreComponents: Array.isArray(row.score_components) ? row.score_components as Lead["scoreComponents"] : [], evidenceIds: Array.isArray(row.evidence_ids) ? row.evidence_ids.map(String) : [], researchConfidence: (row.research_confidence as Lead["researchConfidence"]) ?? "unknown", lastResearchedAt: row.last_researched_at ? String(row.last_researched_at) : null,
+    estimatedValue: row.estimated_value === null || row.estimated_value === undefined ? null : Number(row.estimated_value), currency: String(row.currency ?? "EUR"), dealStage: row.deal_stage ? row.deal_stage as Lead["dealStage"] : null, stageProbability: row.stage_probability === null || row.stage_probability === undefined ? null : Number(row.stage_probability), expectedCloseAt: row.expected_close_at ? String(row.expected_close_at) : null, wonAt: row.won_at ? String(row.won_at) : null, lostAt: row.lost_at ? String(row.lost_at) : null, actualRevenue: row.actual_revenue === null || row.actual_revenue === undefined ? null : Number(row.actual_revenue),
   };
 }
 

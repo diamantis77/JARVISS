@@ -18,6 +18,8 @@ export interface DiscoveredBusiness {
   sources: WebSearchResult[];
 }
 
+export type WebsiteVerificationStatus = "VERIFIED_WEBSITE" | "NO_OFFICIAL_SITE_FOUND" | "UNCERTAIN" | "UNRESEARCHED";
+
 export interface WebResearchProvider {
   readonly name: string;
   searchWeb(input: { query: string; location?: string; maxResults: number }): Promise<{ results: WebSearchResult[]; error?: string }>;
@@ -25,7 +27,7 @@ export interface WebResearchProvider {
 
 export interface BusinessDiscoveryProvider {
   readonly name: string;
-  discover(input: { industry: string; location: string; limit: number; criteria?: Record<string, unknown> }): Promise<{ businesses: DiscoveredBusiness[]; searched: boolean; error?: string }>;
+  discover(input: { industry: string; location: string; limit: number; criteria?: Record<string, unknown>; searchFocus?: string }): Promise<{ businesses: DiscoveredBusiness[]; searched: boolean; error?: string }>;
 }
 
 export interface WebsiteFetcher {
@@ -56,7 +58,7 @@ export interface ResearchService {
   readonly available: boolean;
   readonly mode: "demo" | "live" | "disabled";
   searchWeb(input: { query: string; location?: string; maxResults: number }): Promise<{ results: WebSearchResult[]; error?: string }>;
-  start(input: { jarvisRunId: string; industry: string; location: string; limit: number; criteria?: Record<string, unknown>; onProgress?: (progress: ResearchProgress) => Promise<void> | void }): Promise<ResearchBatchResult>;
+  start(input: { jarvisRunId: string | null; industry: string; location: string; limit: number; criteria?: Record<string, unknown>; onProgress?: (progress: ResearchProgress) => Promise<void> | void }): Promise<ResearchBatchResult>;
   continue(input: { researchRunId: string; onProgress?: (progress: ResearchProgress) => Promise<void> | void }): Promise<ResearchBatchResult>;
   analyzeWebsite(input: { leadId: string; url: string; onProgress?: (progress: ResearchProgress) => Promise<void> | void }): Promise<{ message: string; analysis?: WebsiteAnalysis }>;
   cancel(researchRunId: string): Promise<void>;
@@ -64,7 +66,7 @@ export interface ResearchService {
 
 export interface ResearchBatchResult {
   researchRunId: string;
-  status: "partial" | "completed" | "cancelled" | "failed";
+  status: "pending" | "partial" | "completed" | "cancelled" | "failed";
   discoveredCount: number;
   verifiedCount: number;
   analyzedCount: number;
@@ -72,7 +74,7 @@ export interface ResearchBatchResult {
   failedCount: number;
   processedCount: number;
   message: string;
-  leads: Array<{ id: string; businessName: string; category: string; city: string; score: number; status: string; opportunitySummary: string; source: string }>;
+  leads: Array<{ id: string; businessName: string; category: string; city: string; score: number; status: string; opportunitySummary: string; source: string; websiteStatus: WebsiteVerificationStatus; sourceUrls: string[] }>;
 }
 
 export interface ExtractedWebsitePage extends WebsiteSignals {

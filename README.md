@@ -2,6 +2,16 @@
 
 JARVIS is an authenticated, persistent AI business command center. v0.6 adds durable PostgreSQL-backed operations, workers, scheduling, retries, dead letters, authenticated Pub/Sub push, incremental synchronization, provider health, meeting reminders, morning briefs, diagnostics, and an Operations view while preserving all v0.5 approval and privacy boundaries.
 
+The canonical long-term product and architecture direction is defined in [Project North Star](docs/PROJECT_NORTH_STAR.md). All new work should preserve one JARVIS identity, memory, business brain, tool system, security model, and audit trail across every interface.
+
+## Public repository and Netlify handoff
+
+This repository contains source code, migrations, and configuration examples only. Never commit `.env.local`, another populated `.env` file, Cloudflare/Vonage private keys, runtime logs, or customer data. Use `.env.example` as a list of variable names; enter real values only in the deployment platform's environment-variable settings. Rotate a credential if it is ever exposed in a public commit.
+
+To deploy the web application from GitHub, import this repository in Netlify using its Next.js preset and `npm run build`. Configure the required environment variables in Netlify's UI for both build and Functions runtime; do not put secrets in `netlify.toml`. Add the final Netlify HTTPS callback URL to the Google OAuth application's authorized redirect URIs and set `GOOGLE_REDIRECT_URI` to that exact URL before connecting Gmail on the deployed site. Verify login and a read-only authenticated page on the deployed URL before enabling any external action.
+
+**Runtime boundary:** Netlify's Next.js adapter runs pages and route handlers as serverless functions. The current JARVIS phone media gateway (`scripts/next-with-telephony.ts`) requires a long-lived WebSocket upgrade server, and `npm run worker` / `npm run scheduler` require continuously supervised processes. Importing this repository into Netlify does **not** start those processes and is not a complete production deployment of phone calls or autonomous background operations. Keep phone notifications disabled and do not point Vonage media callbacks at the Netlify URL. Those capabilities need a separate, stable always-on runtime before they can be advertised as production-ready. A local Quick Tunnel is not a substitute for production hosting.
+
 ## Production operations architecture
 
 Provider notifications and recurring schedules never depend on an open browser or process-local job state:
@@ -112,18 +122,18 @@ Google access is connected incrementally from Settings. The browser is redirecte
 Capabilities and scopes:
 
 - Gmail read: `gmail.readonly`, used for bounded thread/message reads and history synchronization.
-- Gmail send: `gmail.send`, used only after an object-bound `send_email` approval.
+- Gmail drafts/send: `gmail.compose`, used for Gmail drafts and only after an object-bound `send_email` approval for sending. This replaces the older `gmail.send` request; existing connections must reconnect to grant it.
 - Calendar events: `calendar.events`, used for event reads and specifically approved create/update/delete operations.
 - Calendar availability: `calendar.events.freebusy`, used for busy-block checks without requesting full calendar administration.
 - `openid email` identifies the selected provider account. The app deliberately does not request `https://mail.google.com/` or the broad `calendar` scope.
 
-Email bodies are marked as untrusted data before they reach JARVIS. They cannot change instructions, authorize tools, approve actions, or request secrets. Reads are bounded; JARVIS does not mirror a mailbox locally. Drafts are internal interactions. Gmail send validates the frozen recipient, subject, body, Gmail thread ID, and RFC reply message ID against the stored draft, claims one approval atomically, and records returned provider IDs.
+Email bodies are marked as untrusted data before they reach JARVIS. They cannot change instructions, authorize tools, approve actions, or request secrets. Reads are bounded; JARVIS does not mirror a mailbox locally. Drafts are internal interactions; the provider adapter also supports creating a Gmail draft, but this is not an authorization to send. Gmail send validates the frozen recipient, subject, body, sending account, Gmail thread ID, and RFC reply message ID against the stored draft, claims one approval atomically, and records returned provider IDs. A draft is claimed before the provider send request; an ambiguous provider outcome remains in `sending` and is not automatically retried.
 
 Calendar reads are safe automatic tools. Create, update, and delete tools always stop at the existing approval gate. Event approvals freeze the calendar, title, start/end, IANA timezone, attendees, location, and description. Ambiguous dates or times fail validation and require clarification.
 
 ## Google Cloud setup
 
-1. Create/select a Google Cloud project and enable **Gmail API**, **Google Calendar API**, and **Cloud Pub/Sub API**.
+1. Create/select a Google Cloud project and enable **Gmail API**. Calendar API is only needed for the separate Calendar integration; Pub/Sub is optional for push notifications.
 2. Configure the OAuth consent screen. During development select Testing and add the owner's Google account as a test user.
 3. Create an OAuth 2.0 Client ID of type **Web application**.
 4. Add the exact local redirect URI: `http://127.0.0.1:3000/api/integrations/google/callback`. Add the production HTTPS equivalent before deployment.
@@ -140,7 +150,7 @@ Create a Pub/Sub topic in the same Cloud project, grant `gmail-api-push@system.g
 
 Set `GOOGLE_CALENDAR_WEBHOOK_BASE_URL` to the public HTTPS origin. JARVIS generates a different cryptographically random token for every channel and stores only its hash. The scheduler renews channels ahead of expiration, replaces old channels safely, and the webhook validates persisted channel/token/resource state before enqueuing an incremental sync.
 
-Localhost cannot receive Google push webhooks. The Settings **Development Sync** buttons perform bounded manual Gmail history or Calendar synchronization and are explicitly labelled as development behavior; no background scheduler is faked.
+Localhost cannot receive Google push webhooks. Without Pub/Sub, the durable scheduler uses hourly reconciliation and the Settings sync button provides an on-demand bounded read. Push/watch jobs are not scheduled until their public provider configuration exists.
 
 ## Notifications
 
@@ -220,6 +230,18 @@ RESEARCH_MAX_LEADS=50
 ```
 
 `OPENAI_RESEARCH_MODEL` is optional and falls back to `OPENAI_MODEL`. The application hard-caps a run at 50 candidates even if configuration is incorrect.
+
+## MULTI-PROVIDER AI SETUP
+
+1. Put `GROQ_API_KEY`, `GEMINI_API_KEY`, and `OPENROUTER_API_KEY` in the **server-only** `.env.local` at the project root. Do not prefix them with `NEXT_PUBLIC_`; do not commit `.env.local`.
+2. Restart `npm run dev` (or the full JARVIS stack). The normal text/tool agent and Greek outreach/website interpretation try Groq → Gemini → OpenRouter Free → OpenAI. Missing keys are skipped. A configured provider is not considered live-verified until it successfully answers a request.
+3. Change `GROQ_MODEL`, `GEMINI_MODEL`, `OPENROUTER_MODEL`, or `OPENAI_FALLBACK_MODEL` in `.env.local` when provider model availability changes. OpenRouter accepts only `openrouter/free` or a model slug ending `:free`; a paid slug is refused. The default Groq model is `openai/gpt-oss-120b` and the Gemini default is `gemini-3.8-flash` (verify availability for your account).
+4. Set `AI_ALLOW_PAID_FALLBACK=false` and restart to disable paid OpenAI routing **and** the OpenAI-only citation-backed live research service. With only the existing OpenAI key, leave the default `true` to retain the prior text-agent behavior. Voice/phone OpenAI Live is a separate, explicitly enabled integration, not a router fallback.
+5. View provider status and process-local counters in **Operations → AI Providers**. Expand a JARVIS run to see final provider, model, latency and the attempt chain. Metrics exclude prompts, outputs, keys and response bodies; they reset on app-process restart.
+6. To test Groq, configure `GROQ_API_KEY`, open the local JARVIS command center, ask a harmless text question, then inspect the run and Operations. To force a safe local Groq failure, configure Groq **and** Gemini keys, set `AI_DEV_FORCE_GROQ_429=true` in `.env.local`, restart the development server, and make one harmless text request. The run should show `Groq RATE_LIMIT → Gemini SUCCESS`; reset the flag afterward. This simulation is ignored outside `NODE_ENV=development`. HTTP 400 intentionally does not trigger provider hopping.
+7. To verify OpenRouter Free fallback, configure its key with `OPENROUTER_MODEL=openrouter/free` and use the router tests or a genuine Groq/Gemini quota/outage. A missing upstream key skips that provider; the OpenRouter attempt must report a free model/router, and OpenAI must not be attempted if OpenRouter succeeds.
+
+The final paid text-agent fallback still uses the OpenAI Responses API with the existing typed tool contract. Existing OpenAI Responses-based citation research and Live voice/phone bridges remain specialized: generic free text responses cannot be silently substituted for web-search citations or real-time audio. The router does not store full prompts or responses in metrics. Provider-account billing is controlled by the provider account; Groq/Gemini model pricing can differ between free and paid tiers, so configure those accounts' own spending controls if strict zero spend is required. Free-tier provider policies may permit processing submitted business data for product improvement; review each account's data controls before routing sensitive CRM content.
 
 ## Realtime voice architecture
 

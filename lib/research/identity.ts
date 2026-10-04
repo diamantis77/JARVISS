@@ -3,6 +3,7 @@ import type { DiscoveredBusiness } from "./contracts";
 function clean(value: string) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\p{L}]+/gu, " ").trim();
 }
+export function normalizedNameLocation(name: string, location: string) { return `${clean(name)}|${clean(location)}`; }
 
 export function normalizedDomain(value: string | null | undefined) {
   if (!value) return null;
@@ -14,7 +15,7 @@ export function candidateIdentityKey(candidate: Pick<DiscoveredBusiness, "busine
   if (domain) return `domain:${domain}`;
   const phone = candidate.phone?.replace(/\D/g, "");
   if (phone && phone.length >= 8) return `phone:${phone}`;
-  return `name-location:${clean(candidate.businessName)}|${clean(candidate.location)}`;
+  return `name-location:${normalizedNameLocation(candidate.businessName, candidate.location)}`;
 }
 
 export function deduplicateCandidates(candidates: DiscoveredBusiness[]) {

@@ -18,19 +18,31 @@ async function main() {
   const db = createAdminClient();
   const scheduler = new ProductionScheduler(db, new SupabaseJobQueue(db), schedulerId);
   let stopping = false;
-  process.on("SIGTERM", () => { stopping = true; });
-  process.on("SIGINT", () => { stopping = true; });
+  let sleepController: AbortController | null = null;
+  const stop = () => { stopping = true; sleepController?.abort(); };
+  const pause = async (milliseconds: number) => {
+    sleepController = new AbortController();
+    try { await waitWithoutTimer(milliseconds, sleepController.signal); }
+    catch (error) { if (!stopping) throw error; }
+    finally { sleepController = null; }
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  if (process.env.JARVIS_DESKTOP_SESSION) {
+    process.on("message", (message) => { if (message === "jarvis-desktop-shutdown") stop(); });
+    process.once("disconnect", stop);
+  }
   console.info(JSON.stringify({ service: "scheduler", schedulerId, status: "started", once }));
 
   do {
     try {
       const result = await scheduler.runOnce();
       console.info(JSON.stringify({ service: "scheduler", schedulerId, status: "tick", ...result }));
-      if (!once && !stopping) await waitWithoutTimer(60_000);
+      if (!once && !stopping) await pause(60_000);
     } catch (error) {
       if (once) throw error;
       console.error(JSON.stringify({ service: "scheduler", schedulerId, status: "degraded", error: error instanceof Error ? error.message : "Scheduler tick failed", retrying: true }));
-      if (!stopping) await waitWithoutTimer(10_000);
+      if (!stopping) await pause(10_000);
     }
   } while (!once && !stopping);
 

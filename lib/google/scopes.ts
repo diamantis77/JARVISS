@@ -1,7 +1,8 @@
 import type { ProviderCapability } from "../../types";
 
 export const GOOGLE_IDENTITY_SCOPES = ["openid", "email"] as const;
-export const GOOGLE_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"] as const;
+// compose permits draft creation and sending; readonly is needed for inbox/reply sync.
+export const GOOGLE_GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.compose"] as const;
 export const GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.events.freebusy"] as const;
 
 export function scopesFor(capability: ProviderCapability) {
